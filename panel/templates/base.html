@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}fleet{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% block header %}{% endblock %}
+{% macro strip() %}
+<div class="strip">
+  {% for name, probe in health.items() %}
+    <span class="probe probe-{{ probe.status }}" title="{{ probe.detail }}">{{ name }}: {{ probe.status }}</span>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% block body %}{% endblock %}
+<div class="footer">{{ strip() }}</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

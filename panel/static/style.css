@@ -1,0 +1,67 @@
+:root {
+  --bg: #0d1117;
+  --fg: #c9d1d9;
+  --dim: #8b949e;
+  --line: #21262d;
+  --accent: #2f81f7;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+header.bar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 16px; border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 700; color: #fff; }
+nav { display: flex; gap: 12px; flex: 1; }
+form.inline { margin: 0; }
+button.link {
+  background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit;
+}
+main { padding: 16px; }
+h2 { font-size: 14px; font-weight: 600; }
+.count { color: var(--dim); }
+table.grid { width: 100%; border-collapse: collapse; }
+table.grid th, table.grid td {
+  text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.grid th { color: var(--dim); cursor: pointer; user-select: none; }
+tr.dead { color: var(--dim); }
+tr.alive td:first-child::before { content: "\25cf "; color: var(--ok); }
+tr.dead td:first-child::before { content: "\25cb "; }
+.empty { color: var(--dim); text-align: center; padding: 24px; }
+.strip {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  padding: 6px 16px; border-top: 1px solid var(--line);
+  position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg);
+}
+.probe { color: var(--dim); }
+.probe-up, .probe-ok { color: var(--ok); }
+.probe-down, .probe-low { color: var(--bad); }
+.probe-warn { color: var(--warn); }
+.login-wrap { display: grid; place-items: center; height: 100vh; }
+.card { background: #161b22; border: 1px solid var(--line); border-radius: 8px; padding: 24px; }
+.card.login { width: 320px; display: flex; flex-direction: column; gap: 12px; }
+.card h1 { margin: 0 0 4px; font-size: 18px; }
+.card label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); }
+.card input {
+  background: #0d1117; border: 1px solid var(--line); color: var(--fg);
+  padding: 6px 8px; border-radius: 6px; font: inherit;
+}
+.card button {
+  background: var(--accent); color: #fff; border: 0; padding: 8px;
+  border-radius: 6px; cursor: pointer; font: inherit;
+}
+.error { color: var(--bad); margin: 0; }
+.warn { color: var(--warn); }
+.footer { height: 32px; }

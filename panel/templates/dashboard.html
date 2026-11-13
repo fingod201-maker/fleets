@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}fleet — implants{% endblock %}
+{% block header %}
+<header class="bar">
+  <span class="brand">fleet</span>
+  <nav><a href="/">implants</a><a href="/audit">audit</a></nav>
+  <form method="post" action="/logout" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="link">sign out</button>
+  </form>
+</header>
+{% endblock %}
+{% block body %}
+<main>
+  <h2>live implants <span class="count">{{ implants[0]|length }}</span></h2>
+  {% if implants[1] %}<p class="warn">bridge: {{ implants[1] }}</p>{% endif %}
+  <table class="grid" id="implant-table">
+    <thead>
+      <tr>
+        <th data-sort="host">host</th>
+        <th data-sort="os">os</th>
+        <th data-sort="arch">arch</th>
+        <th data-sort="user">user</th>
+        <th data-sort="pid">pid</th>
+        <th data-sort="transport">transport</th>
+        <th data-sort="age">last seen</th>
+        <th data-sort="jitter">jitter</th>
+        <th>tags</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in implants[0] %}
+      <tr data-id="{{ s.id }}" class="{{ 'alive' if s.alive else 'dead' }}">
+        <td>{{ s.host }}</td>
+        <td>{{ s.os }}</td>
+        <td>{{ s.arch }}</td>
+        <td>{{ s.user }}</td>
+        <td>{{ s.pid }}</td>
+        <td>{{ s.transport }}</td>
+        <td>{{ s.age }}</td>
+        <td>{{ s.reconnect_interval }}s</td>
+        <td>{{ s.tags|join(', ') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">no implants</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</main>
+{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>{% endblock %}

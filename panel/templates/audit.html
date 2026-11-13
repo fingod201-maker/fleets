@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}fleet — audit{% endblock %}
+{% block header %}
+<header class="bar">
+  <span class="brand">fleet</span>
+  <nav><a href="/">implants</a><a href="/audit">audit</a><a href="/audit.csv">csv</a></nav>
+  <form method="post" action="/logout" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="link">sign out</button>
+  </form>
+</header>
+{% endblock %}
+{% block body %}
+<main>
+  <h2>audit log</h2>
+  <table class="grid">
+    <thead><tr><th>when</th><th>actor</th><th>action</th><th>target</th><th>result</th><th>detail</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="res-{{ r.result }}">
+        <td>{{ '%.0f'|format(r.ts) }}</td>
+        <td>{{ r.actor }}</td>
+        <td>{{ r.action }}</td>
+        <td>{{ r.target }}</td>
+        <td>{{ r.result }}</td>
+        <td>{{ r.detail }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">no rows</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</main>
+{% endblock %}
