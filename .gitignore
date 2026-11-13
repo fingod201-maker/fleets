@@ -1,0 +1,30 @@
+# secrets
+/etc/panel/env is on-host; local copies:
+deploy/.cf-ids
+panel/.env
+*.local
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+panel/var/
+panel/artifacts/
+panel/data/*.db
+panel/data/*.db-*
+
+# go
+bridge/bin/
+bridge/sliverc
+
+# build outputs
+droppers/out/
+loader/out/
+rd/out/
+verify/out/
+
+# misc
+*.log
+.DS_Store
