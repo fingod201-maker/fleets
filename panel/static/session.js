@@ -47,18 +47,20 @@ function wsUrl(path) {
   return `${proto}//${location.host}${path}`;
 }
 
-async function connectDesktop() {
+async function connectDesktop(skipLaunch) {
   await resolveSession();
   if (rdSocket && rdSocket.readyState <= 1) return;
   const canvas = document.getElementById("rd-canvas");
   const status = document.getElementById("rd-status");
   try { canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); } catch (err) {}
   // ask the panel to upload+launch the rd helper on the target (best effort)
-  try {
-    await fetch(`/api/${sessionId}/desktop`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-    });
-  } catch (err) { /* helper may already be running */ }
+  if (!skipLaunch) {
+    try {
+      await fetch(`/api/${sessionId}/desktop`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+    } catch (err) { /* helper may already be running */ }
+  }
   status.textContent = "connecting…";
   rdSocket = new WebSocket(wsUrl(`/rd/${sessionId}`));
   rdSocket.binaryType = "blob";
@@ -249,7 +251,7 @@ document.getElementById("hvnc-start").addEventListener("click", async () => {
   } catch (err) {
     status.textContent = "HVNC request failed";
   }
-  setTimeout(connectDesktop, 1500);
+  setTimeout(() => connectDesktop(true), 1500);
 });
 
 document.getElementById("persist").addEventListener("click", async () => {

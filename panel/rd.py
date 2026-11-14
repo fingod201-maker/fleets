@@ -14,6 +14,7 @@ import hmac
 import logging
 import time
 from collections import defaultdict
+from contextlib import suppress
 from urllib.parse import parse_qs, urlparse
 
 from .config import Settings
@@ -75,16 +76,12 @@ class RDBroker:
             return
         self._server.close()
         for connection in list(self._helpers.values()):
-            try:
+            with suppress(Exception):
                 await connection.close(code=1001, reason="shutdown")  # type: ignore[attr-defined]
-            except Exception:
-                pass
         self._helpers.clear()
         self._browsers.clear()
-        try:
+        with suppress(Exception):
             await asyncio.wait_for(self._server.wait_closed(), timeout=3)  # type: ignore[attr-defined]
-        except (asyncio.TimeoutError, Exception):
-            pass
 
     # -- helper side ---------------------------------------------------------
     async def _helper_handler(self, connection: object) -> None:
@@ -102,10 +99,8 @@ class RDBroker:
         # one helper per session: the newest connection replaces the old one
         previous = self._helpers.get(session_id)
         if previous is not None and previous is not connection:
-            try:
+            with suppress(Exception):
                 await previous.close(code=4000, reason="replaced")  # type: ignore[attr-defined]
-            except Exception:
-                pass
         self._helpers[session_id] = connection
         log.info("rd helper connected for %s", session_id)
         try:

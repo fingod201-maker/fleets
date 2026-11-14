@@ -30,7 +30,7 @@ else
 fi
 
 if [ -d /Applications/Xcode.app ] && command -v clang >/dev/null 2>&1; then
-  clang -O2 -o "$OUT/rd-mac" "$DIR/mac/main.c" \
+  clang -O2 -Wno-deprecated-declarations -o "$OUT/rd-mac" "$DIR/mac/main.c" \
     -framework ApplicationServices -framework CoreGraphics -framework Foundation
   echo "built $OUT/rd-mac"
 else

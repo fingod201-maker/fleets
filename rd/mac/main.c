@@ -51,31 +51,67 @@ static int json_num(const char *s, const char *key, double *out) {
     return 1;
 }
 
+/* union of every active display, in global points (CGEvent coordinate space) */
+static double g_ox = 0, g_oy = 0, g_uw = 1, g_uh = 1;
+
+static void display_union(void) {
+    uint32_t count = 0;
+    CGGetActiveDisplayList(0, NULL, &count);
+    CGDirectDisplayID ids[32];
+    if (count > 32) count = 32;
+    if (count == 0) { g_ox = g_oy = 0; g_uw = g_uh = 1; return; }
+    CGGetActiveDisplayList(count, ids, &count);
+    CGRect u = CGRectNull;
+    for (uint32_t i = 0; i < count; i++) u = CGRectUnion(u, CGDisplayBounds(ids[i]));
+    g_ox = u.origin.x; g_oy = u.origin.y;
+    g_uw = u.size.width > 0 ? u.size.width : 1;
+    g_uh = u.size.height > 0 ? u.size.height : 1;
+}
+
 static unsigned char *capture_rgb(int *out_w, int *out_h) {
-    CGImageRef image = CGDisplayCreateImage(CGMainDisplayID());
+    /* composite of all displays (falls back to the main display) */
+    CGImageRef image = CGWindowListCreateImage(
+        CGRectInfinite, kCGWindowListOptionOnScreenOnly, kCGNullWindowID,
+        kCGWindowImageDefault);
+    if (!image) image = CGDisplayCreateImage(CGMainDisplayID());
     if (!image) return NULL;
     size_t w = CGImageGetWidth(image);
     size_t h = CGImageGetHeight(image);
     CGDataProviderRef provider = CGImageGetDataProvider(image);
     CFDataRef raw = CGDataProviderCopyData(provider);
-    const unsigned char *bytes = CFDataGetBytePtr(raw);
+    const unsigned char *bytes = raw ? CFDataGetBytePtr(raw) : NULL;
     if (!bytes) {
-        CFRelease(raw);
+        if (raw) CFRelease(raw);
         CGImageRelease(image);
         return NULL;
     }
-    unsigned char *rgb = (unsigned char *)malloc(w * h * 3);
+    /* rhythm: score of bytes per pixel from CGImage is BGRA (4bpp) */
+    size_t bpp = CFDataGetLength(raw) / (w * h ? w * h : 1);
+    if (bpp < 3) bpp = 4;
+    int sw = (int)w, sh = (int)h, maxw = 1600;
+    if (w > (size_t)maxw) {
+        sw = maxw;
+        sh = (int)((long long)h * maxw / (long long)w);
+        if (sh <= 0) sh = 1;
+    }
+    unsigned char *rgb = (unsigned char *)malloc((size_t)sw * sh * 3);
     if (rgb) {
-        for (size_t i = 0, n = w * h; i < n; i++) {
-            rgb[i * 3 + 0] = bytes[i * 4 + 2];
-            rgb[i * 3 + 1] = bytes[i * 4 + 1];
-            rgb[i * 3 + 2] = bytes[i * 4 + 0];
+        for (int y = 0; y < sh; y++) {
+            size_t sy = (size_t)((long long)y * (long long)h / sh);
+            for (int x = 0; x < sw; x++) {
+                size_t sx = (size_t)((long long)x * (long long)w / sw);
+                const unsigned char *p = bytes + (sy * w + sx) * bpp;
+                unsigned char *o = rgb + ((size_t)y * sw + x) * 3;
+                o[0] = p[2];
+                o[1] = p[1];
+                o[2] = p[0];
+            }
         }
     }
     CFRelease(raw);
     CGImageRelease(image);
-    *out_w = (int)w;
-    *out_h = (int)h;
+    *out_w = sw;
+    *out_h = sh;
     return rgb;
 }
 
@@ -90,7 +126,8 @@ static void post_mouse(CGEventType type, int x, int y, CGMouseButton button) {
 static void apply_input(const char *msg, int w, int h) {
     double x, y, btn, code, down;
     if (json_str_is(msg, "\"t\"", "m") && json_num(msg, "\"x\"", &x) && json_num(msg, "\"y\"", &y)) {
-        post_mouse(kCGEventMouseMoved, (int)(x * w), (int)(y * h), kCGMouseButtonLeft);
+        post_mouse(kCGEventMouseMoved, (int)(g_ox + x * g_uw), (int)(g_oy + y * g_uh),
+                   kCGMouseButtonLeft);
     } else if (json_str_is(msg, "\"t\"", "b") && json_num(msg, "\"btn\"", &btn)) {
         json_num(msg, "\"down\"", &down);
         int b = (int)btn;
@@ -108,6 +145,8 @@ static void apply_input(const char *msg, int w, int h) {
         CGEventRef ev = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)code, down != 0);
         if (ev) { CGEventPost(kCGHIDEventTap, ev); CFRelease(ev); }
     }
+    (void)w;
+    (void)h;
 }
 
 int main(int argc, char **argv) {
@@ -115,16 +154,22 @@ int main(int argc, char **argv) {
     const char *session = "session";
     const char *token = "";
     int port = 8443;
+    const char *mode = "desktop";
     for (int i = 1; i < argc - 1; i++) {
         if (strcmp(argv[i], "--host") == 0) host = argv[++i];
         else if (strcmp(argv[i], "--port") == 0) port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--session") == 0) session = argv[++i];
         else if (strcmp(argv[i], "--token") == 0) token = argv[++i];
+        else if (strcmp(argv[i], "--mode") == 0) mode = argv[++i];
     }
+    int hvnc = (strcmp(mode, "hvnc") == 0);
+    (void)hvnc;
     srand((unsigned)getpid());
 
-    int screen_w = (int)CGDisplayPixelsWide(CGMainDisplayID());
-    int screen_h = (int)CGDisplayPixelsHigh(CGMainDisplayID());
+    display_union();
+    int screen_w = 0, screen_h = 0;
+    unsigned char *probe = capture_rgb(&screen_w, &screen_h);
+    free(probe);
     int trusted = AXIsProcessTrusted();
 
     char path[512];
@@ -135,11 +180,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "rd-mac: cannot connect\n");
         return 1;
     }
-    char hello[256];
+    char hello[384];
     snprintf(hello, sizeof(hello),
-             "{\"t\":\"hello\",\"os\":\"darwin\",\"w\":%d,\"h\":%d,\"view_only\":%s,"
+             "{\"t\":\"hello\",\"os\":\"darwin\",\"w\":%d,\"h\":%d,\"view_only\":false,"
+             "\"mode\":\"%s\",\"caps\":[\"desktop\",\"input\",\"hvnc\"],\"hvnc\":true,"
              "\"needs_accessibility\":%s}",
-             screen_w, screen_h, trusted ? "false" : "true", trusted ? "false" : "true");
+             screen_w, screen_h, mode, trusted ? "false" : "true");
     ws_send(&ws, hello, strlen(hello), 1);
 
     char inbuf[4096];
