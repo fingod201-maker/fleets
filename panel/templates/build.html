@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}fleet — build{% endblock %}
+{% block header %}
+<header class="bar">
+  <span class="brand">fleet</span>
+  <nav><a href="/">implants</a><a href="/build">build</a><a href="/audit">audit</a></nav>
+  <form method="post" action="/logout" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="link">sign out</button>
+  </form>
+</header>
+{% endblock %}
+{% block body %}
+<main>
+  <h2>build artifacts</h2>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/build" class="card build">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>document name<input type="text" name="doc_name" value="{{ defaults.document_name }}"></label>
+    <label>transport
+      <select name="transport">
+        <option value="mtls">mtls</option>
+        <option value="http">http</option>
+        <option value="tcp">tcp</option>
+      </select>
+    </label>
+    <label>c2 url<input type="text" name="c2_url" value="{{ defaults.public_host }}:8888"></label>
+    <label>base url<input type="text" name="base_url" value="https://get.{{ defaults.cf_zone_name or defaults.public_host }}"></label>
+    <label>interval (s)<input type="number" name="interval" value="60"></label>
+    <label>jitter (%)<input type="number" name="jitter" value="35"></label>
+    <label class="check"><input type="checkbox" name="evasion" value="1" checked> evasion</label>
+    <label class="check"><input type="checkbox" name="beacon" value="1" checked> beacon</label>
+    <button type="submit">build six artifacts</button>
+    <p class="dim">targets: windows/amd64, linux/amd64, linux/arm64, linux/386, darwin/arm64, darwin/amd64</p>
+  </form>
+
+  <table class="grid">
+    <thead><tr><th>when</th><th>os</th><th>arch</th><th>name</th><th>size</th><th>sha256</th><th></th></tr></thead>
+    <tbody>
+    {% for a in artifacts %}
+      <tr>
+        <td>{{ '%.0f'|format(a.ts) }}</td>
+        <td>{{ a.os }}</td>
+        <td>{{ a.arch }}</td>
+        <td>{{ a.name }}</td>
+        <td>{{ a.size }}</td>
+        <td class="mono">{{ a.sha256[:16] }}…</td>
+        <td><a href="/dl/{{ a.name }}">dl</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">no artifacts yet</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</main>
+{% endblock %}

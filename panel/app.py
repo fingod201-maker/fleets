@@ -6,14 +6,21 @@ import logging
 import secrets
 import time
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from . import health
 from .auth import Auth
+from .build import BuildPipeline, load_build_request
 from .config import Settings
 from .db import Database
 from .sliver import SliverBridge
@@ -43,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth = auth
     app.state.bridge = SliverBridge(config)
     app.state.views = BridgeViews(config, database, app.state.bridge)
+    app.state.pipeline = BuildPipeline(config, database, app.state.bridge)
 
     if config.static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(config.static_dir)), name="static")
@@ -207,6 +215,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             lines.append(",".join(fields))
         headers = {"Content-Disposition": "attachment; filename=audit.csv"}
         return PlainTextResponse("\n".join(lines) + "\n", headers=headers, media_type="text/csv")
+
+    # -- build ---------------------------------------------------------------
+    @app.get("/build", response_class=HTMLResponse)
+    async def build_page(request: Request):
+        session = require(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        artifacts = await run_in_threadpool(app.state.pipeline.recent)
+        return render(
+            request,
+            "build.html",
+            csrf=csrf_token(request),
+            artifacts=artifacts,
+            error="",
+            defaults=config,
+        )
+
+    @app.post("/build", response_class=HTMLResponse)
+    async def build_submit(request: Request):
+        session = require(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        form = await request.form()
+        if not auth.verify_csrf(str(session["csrf"]), str(form.get("csrf", ""))):
+            return RedirectResponse("/build?error=csrf", status_code=303)
+        build_request = load_build_request({key: str(value) for key, value in form.items()}, config)
+        try:
+            built = await run_in_threadpool(app.state.pipeline.build, build_request)
+            database.audit(str(session["actor"]), "build", "ok", detail=f"{len(built)} artifacts")
+            error = ""
+        except Exception as exc:  # surfaced to the operator, never swallowed
+            database.audit(str(session["actor"]), "build", "fail", detail=str(exc)[:200])
+            built = []
+            error = f"{type(exc).__name__}: {exc}"
+        artifacts = await run_in_threadpool(app.state.pipeline.recent)
+        return render(
+            request,
+            "build.html",
+            csrf=csrf_token(request),
+            artifacts=artifacts,
+            error=error,
+            defaults=config,
+        )
+
+    @app.get("/dl/{name}")
+    async def download_artifact(name: str):
+        path = config.artifacts_dir / name
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"no artifact {name}")
+        return FileResponse(path, filename=name)
 
     return app
 

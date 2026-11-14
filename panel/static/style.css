@@ -64,4 +64,13 @@ tr.dead td:first-child::before { content: "\25cb "; }
 }
 .error { color: var(--bad); margin: 0; }
 .warn { color: var(--warn); }
+.dim { color: var(--dim); }
+.mono { font-family: ui-monospace, monospace; }
+.card.build {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; margin-bottom: 16px;
+}
+.card.build button { grid-column: 1 / -1; }
+.card.build p { grid-column: 1 / -1; margin: 0; }
+label.check { flex-direction: row; align-items: center; gap: 8px; }
 .footer { height: 32px; }

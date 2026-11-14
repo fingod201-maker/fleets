@@ -44,16 +44,18 @@ class _Backoff:
 class SliverBridge:
     def __init__(self, config: Settings) -> None:
         self.config = config
-        self._client = httpx.Client(base_url=config.bridge_url, timeout=10.0)
+        self._client = httpx.Client(base_url=config.bridge_url, timeout=30.0)
         self._backoff = _Backoff()
 
     @property
     def available(self) -> bool:
         return self._backoff.ready()
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    def _request(
+        self, method: str, path: str, timeout: float | None = None, **kwargs: Any
+    ) -> httpx.Response:
         try:
-            resp = self._client.request(method, path, **kwargs)
+            resp = self._client.request(method, path, timeout=timeout, **kwargs)
             resp.raise_for_status()
             self._backoff.success()
             return resp
@@ -65,8 +67,8 @@ class SliverBridge:
             delay = self._backoff.failure()
             raise BridgeError(f"{path}: {type(exc).__name__} (retry in {delay:.2f}s)") from exc
 
-    def _json(self, method: str, path: str, **kwargs: Any) -> Any:
-        return self._request(method, path, **kwargs).json()
+    def _json(self, method: str, path: str, timeout: float | None = None, **kwargs: Any) -> Any:
+        return self._request(method, path, timeout=timeout, **kwargs).json()
 
     # -- probes --------------------------------------------------------------
     def health(self) -> dict[str, Any]:
@@ -108,7 +110,10 @@ class SliverBridge:
 
     def download(self, session_id: str, path: str) -> bytes:
         return self._request(
-            "GET", f"/sliver/session/{session_id}/download", params={"path": path}
+            "GET",
+            f"/sliver/session/{session_id}/download",
+            timeout=300.0,
+            params={"path": path},
         ).content
 
     def ps(self, session_id: str, full: bool = True) -> dict[str, Any]:
@@ -129,8 +134,8 @@ class SliverBridge:
         return self._json("POST", f"/sliver/session/{session_id}/rename", json={"name": name})
 
     # -- builds --------------------------------------------------------------
-    def generate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._json("POST", "/sliver/generate", json=payload)
+    def generate(self, payload: dict[str, Any], timeout: float = 600.0) -> dict[str, Any]:
+        return self._json("POST", "/sliver/generate", timeout=timeout, json=payload)
 
     # -- websockets ----------------------------------------------------------
     def open_ws(self, path: str) -> Any:

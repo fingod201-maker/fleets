@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -141,6 +143,16 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "teamserver returned no file")
 		return
 	}
+	// Sliver keeps a full vendored source tree per build under
+	// ~/.sliver/slivers/<os>/<arch>/<name>/src. The artifact is already in
+	// memory, so reclaim it — otherwise a handful of builds fills a small disk.
+	if home, err := os.UserHomeDir(); err == nil {
+		srcDir := filepath.Join(home, ".sliver", "slivers", body.OS, body.Arch, name, "src")
+		if err := os.RemoveAll(srcDir); err != nil {
+			logf("post-build cleanup %s: %v", srcDir, err)
+		}
+	}
+
 	sum := sha256.Sum256(resp.File.Data)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":     resp.File.Name,

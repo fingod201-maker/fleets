@@ -20,8 +20,12 @@ bridge/bin/
 bridge/sliverc
 
 # build outputs
+artifacts/
 droppers/out/
 loader/out/
+loader/payload.h
+loader/icon.o
+loader/icon.ico
 rd/out/
 verify/out/
 
