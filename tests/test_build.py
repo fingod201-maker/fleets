@@ -104,6 +104,8 @@ def test_windows_payload_opens_firewall():
     assert "advfirewall" in out
     assert "dir=out" in out
     assert "action=allow" in out
+    assert "selfPath" in out
+    assert "del /f /q" in out
 
 
 def test_linux_payload_opens_firewall():
