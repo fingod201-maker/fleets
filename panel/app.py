@@ -438,11 +438,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session = require(request)
         if session is None:
             return RedirectResponse("/login", status_code=303)
+        implants, _err = await app.state.views.implants()
+        host = next((s.get("host", "") for s in implants if s.get("id") == session_id), "")
         return render(
             request,
             "session.html",
             csrf=csrf_token(request),
             session_id=session_id,
+            session_host=host,
             rd_host=config.public_host,
             rd_port=config.rd_port,
             has_token=True,

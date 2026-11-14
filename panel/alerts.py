@@ -69,8 +69,12 @@ class Alerts:
             self._health_task = asyncio.create_task(self._health_loop())
 
     # -- dedup ---------------------------------------------------------------
-    def _should_alert(self, session_id: str, fp: str) -> str | None:
-        key = f"alert:session:{session_id}"
+    def _should_alert(self, session: dict) -> str | None:
+        # key on the *host*, not the session id: a reconnecting implant mints a
+        # new session id, which must not produce another "NEW IMPLANT" alert.
+        host = str(session.get("host") or session.get("id") or "?")
+        fp = fingerprint(session)
+        key = f"alert:host:{host}"
         now = time.time()
         previous = self.db.kv_get(key)
         if previous:
@@ -116,7 +120,7 @@ class Alerts:
         if not sid:
             return
         if kind == "session-connected":
-            decision = self._should_alert(sid, fingerprint(session))
+            decision = self._should_alert(session)
             if decision is None:
                 return
             self._seen.add(sid)

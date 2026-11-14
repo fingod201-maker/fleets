@@ -11,7 +11,7 @@
 </header>
 {% endblock %}
 {% block body %}
-<main data-session="{{ session_id }}" id="session-root">
+<main data-session="{{ session_id }}" data-host="{{ session_host }}" id="session-root">
   <h2 class="mono">{{ session_id }}</h2>
   <div class="tabs">
     <button class="tab" data-tab="desktop">desktop</button>
