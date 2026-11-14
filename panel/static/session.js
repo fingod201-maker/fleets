@@ -52,6 +52,12 @@ async function connectDesktop() {
   if (rdSocket && rdSocket.readyState <= 1) return;
   const canvas = document.getElementById("rd-canvas");
   const status = document.getElementById("rd-status");
+  // ask the panel to upload+launch the rd helper on the target (best effort)
+  try {
+    await fetch(`/api/${sessionId}/desktop`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+  } catch (err) { /* helper may already be running */ }
   status.textContent = "connecting…";
   rdSocket = new WebSocket(wsUrl(`/rd/${sessionId}`));
   rdSocket.binaryType = "blob";

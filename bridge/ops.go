@@ -13,9 +13,10 @@ import (
 func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Path   string   `json:"path"`
-		Args   []string `json:"args"`
-		Output bool     `json:"output"`
+		Path       string   `json:"path"`
+		Args       []string `json:"args"`
+		Output     bool     `json:"output"`
+		Background bool     `json:"background"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -32,10 +33,11 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	resp, err := client.Execute(ctx, &sliverpb.ExecuteReq{
-		Path:    body.Path,
-		Args:    body.Args,
-		Output:  true,
-		Request: &commonpb.Request{SessionID: id},
+		Path:       body.Path,
+		Args:       body.Args,
+		Output:     !body.Background,
+		Background: body.Background,
+		Request:    &commonpb.Request{SessionID: id},
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())

@@ -92,12 +92,17 @@ class SliverBridge:
         return self._json("GET", f"/sliver/session/{session_id}/info")
 
     def exec(
-        self, session_id: str, path: str, args: list[str], output: bool = True
+        self,
+        session_id: str,
+        path: str,
+        args: list[str],
+        output: bool = True,
+        background: bool = False,
     ) -> dict[str, Any]:
         return self._json(
             "POST",
             f"/sliver/session/{session_id}/exec",
-            json={"path": path, "args": args, "output": output},
+            json={"path": path, "args": args, "output": output, "background": background},
         )
 
     def ls(self, session_id: str, path: str) -> dict[str, Any]:

