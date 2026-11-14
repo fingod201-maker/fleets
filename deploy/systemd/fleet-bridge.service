@@ -1,0 +1,25 @@
+[Unit]
+Description=fleet sliver gRPC<->HTTP bridge
+After=network-online.target fleet-sliver.service
+Wants=network-online.target
+Requires=fleet-sliver.service
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+EnvironmentFile=/etc/panel/env
+Environment=SLIVER_CFG=/opt/panel/panel.cfg
+Environment=BRIDGE_BIND=127.0.0.1:8001
+ExecStart=/opt/panel/bin/sliverc
+Restart=always
+RestartSec=5
+WatchdogSec=60
+MemoryMax=1G
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/panel /home/opc/.sliver
+
+[Install]
+WantedBy=multi-user.target

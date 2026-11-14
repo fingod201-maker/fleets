@@ -1,0 +1,25 @@
+[Unit]
+Description=fleet panel
+After=network-online.target fleet-bridge.service
+Wants=network-online.target
+Requires=fleet-bridge.service
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+WorkingDirectory=/opt/panel/app
+EnvironmentFile=/etc/panel/env
+Environment=PYTHONPATH=/opt/panel/app
+ExecStart=/opt/panel/venv/bin/uvicorn panel.app:app --host 127.0.0.1 --port 8000 --log-level warning
+Restart=always
+RestartSec=5
+WatchdogSec=60
+MemoryMax=1G
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/panel /var/lib/fleet
+
+[Install]
+WantedBy=multi-user.target

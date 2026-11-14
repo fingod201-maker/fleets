@@ -1,0 +1,21 @@
+[Unit]
+Description=fleet sliver teamserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+ExecStart=/opt/panel/bin/sliver-server daemon -l 127.0.0.1 -p 31337
+Restart=always
+RestartSec=5
+WatchdogSec=60
+MemoryMax=1G
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/panel /home/opc/.sliver
+
+[Install]
+WantedBy=multi-user.target
