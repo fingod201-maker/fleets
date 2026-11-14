@@ -151,7 +151,21 @@ static void inject_input(const char *msg) {
         pt.y = g_my;
         HWND target = WindowFromPoint(pt);
         if (target) {
-            PostMessageA(target, WM_MOUSEMOVE, 0, MAKELPARAM(g_mx, g_my));
+            POINT cp = pt;
+            ScreenToClient(target, &cp);
+            PostMessageA(target, WM_MOUSEMOVE, 0, MAKELPARAM(cp.x, cp.y));
+        }
+    } else if (json_str_is(msg, "\"t\"", "txt")) {
+        char txt[1024];
+        json_str(msg, "\"text\"", txt, sizeof(txt));
+        if (txt[0]) {
+            wchar_t wbuf[600];
+            int n = MultiByteToWideChar(CP_UTF8, 0, txt, -1, wbuf, 600);
+            HWND target = GetForegroundWindow();
+            if (!target) target = GetDesktopWindow();
+            for (int i = 0; i < n - 1; i++) {
+                PostMessageW(target, WM_CHAR, (WPARAM)wbuf[i], 1);
+            }
         }
     } else if (json_str_is(msg, "\"t\"", "b") && json_num(msg, "\"btn\"", &btn)) {
         json_num(msg, "\"down\"", &down);
@@ -163,7 +177,9 @@ static void inject_input(const char *msg) {
             UINT m = (btn == 2) ? (down ? WM_RBUTTONDOWN : WM_RBUTTONUP)
                                 : (btn == 1) ? (down ? WM_MBUTTONDOWN : WM_MBUTTONUP)
                                              : (down ? WM_LBUTTONDOWN : WM_LBUTTONUP);
-            PostMessageA(target, m, (WPARAM)(down ? MK_LBUTTON : 0), MAKELPARAM(g_mx, g_my));
+            POINT cp = pt;
+            ScreenToClient(target, &cp);
+            PostMessageA(target, m, (WPARAM)(down ? MK_LBUTTON : 0), MAKELPARAM(cp.x, cp.y));
         }
     } else if (json_str_is(msg, "\"t\"", "k") && json_num(msg, "\"code\"", &code)) {
         json_num(msg, "\"down\"", &down);

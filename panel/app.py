@@ -453,6 +453,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             has_token=True,
         )
 
+    @app.get("/viewer/{session_id}", response_class=HTMLResponse)
+    async def viewer_page(request: Request, session_id: str, mode: str = "desktop"):
+        if require(request) is None:
+            return RedirectResponse("/login", status_code=303)
+        implants, _err = await app.state.views.implants()
+        host = next((s.get("host", "") for s in implants if s.get("id") == session_id), "")
+        return render(
+            request,
+            "viewer.html",
+            session_id=session_id,
+            session_host=host,
+            mode="hvnc" if mode == "hvnc" else "desktop",
+        )
+
     @app.get("/api/{session_id}/token")
     async def api_token(request: Request, session_id: str):
         if require(request) is None:

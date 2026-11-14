@@ -51,6 +51,48 @@ static int json_num(const char *s, const char *key, double *out) {
     return 1;
 }
 
+static void json_str(const char *s, const char *key, char *out, size_t cap) {
+    out[0] = 0;
+    const char *p = strstr(s, key);
+    if (!p) return;
+    p += strlen(key);
+    while (*p == ' ' || *p == ':' || *p == '\t') p++;
+    if (*p != '"') return;
+    p++;
+    size_t o = 0;
+    while (*p && *p != '"' && o + 1 < cap) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            if (*p == 'n') { out[o++] = '\n'; p++; continue; }
+            if (*p == 't') { out[o++] = '\t'; p++; continue; }
+        }
+        out[o++] = *p++;
+    }
+    out[o] = 0;
+}
+
+static void type_text(const char *txt) {
+    const unsigned char *p = (const unsigned char *)txt;
+    while (p && *p) {
+        UniChar u;
+        if (*p < 0x80) { u = *p++; }
+        else if ((*p & 0xE0) == 0xC0 && p[1]) { u = (UniChar)(((p[0] & 0x1F) << 6) | (p[1] & 0x3F)); p += 2; }
+        else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) { u = (UniChar)(((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F)); p += 3; }
+        else { p++; continue; }
+        CGEventRef ev = CGEventCreateKeyboardEvent(NULL, 0, true);
+        if (!ev) continue;
+        CGEventKeyboardSetUnicodeString(ev, 1, &u);
+        CGEventPost(kCGHIDEventTap, ev);
+        CFRelease(ev);
+        CGEventRef up = CGEventCreateKeyboardEvent(NULL, 0, false);
+        if (up) {
+            CGEventKeyboardSetUnicodeString(up, 1, &u);
+            CGEventPost(kCGHIDEventTap, up);
+            CFRelease(up);
+        }
+    }
+}
+
 /* union of every active display, in global points (CGEvent coordinate space) */
 static double g_ox = 0, g_oy = 0, g_uw = 1, g_uh = 1;
 
@@ -144,6 +186,10 @@ static void apply_input(const char *msg, int w, int h) {
         json_num(msg, "\"down\"", &down);
         CGEventRef ev = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)code, down != 0);
         if (ev) { CGEventPost(kCGHIDEventTap, ev); CFRelease(ev); }
+    } else if (json_str_is(msg, "\"t\"", "txt")) {
+        char txt[1024];
+        json_str(msg, "\"text\"", txt, sizeof(txt));
+        type_text(txt);
     }
     (void)w;
     (void)h;

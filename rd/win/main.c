@@ -32,6 +32,43 @@ static int json_num(const char *s, const char *key, double *out) {
     return 1;
 }
 
+static void json_str(const char *s, const char *key, char *out, size_t cap) {
+    out[0] = 0;
+    const char *p = strstr(s, key);
+    if (!p) return;
+    p += strlen(key);
+    while (*p == ' ' || *p == ':' || *p == '\t') p++;
+    if (*p != '"') return;
+    p++;
+    size_t o = 0;
+    while (*p && *p != '"' && o + 1 < cap) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            if (*p == 'n') { out[o++] = '\n'; p++; continue; }
+            if (*p == 't') { out[o++] = '\t'; p++; continue; }
+        }
+        out[o++] = *p++;
+    }
+    out[o] = 0;
+}
+
+static void type_text(const char *txt) {
+    if (!txt || !txt[0]) return;
+    wchar_t wbuf[600];
+    int n = MultiByteToWideChar(CP_UTF8, 0, txt, -1, wbuf, 600);
+    for (int i = 0; i < n - 1; i++) {
+        INPUT in;
+        memset(&in, 0, sizeof(in));
+        in.type = INPUT_KEYBOARD;
+        in.ki.wVk = 0;
+        in.ki.wScan = (WORD)wbuf[i];
+        in.ki.dwFlags = KEYEVENTF_UNICODE;
+        SendInput(1, &in, sizeof(in));
+        in.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+        SendInput(1, &in, sizeof(in));
+    }
+}
+
 static unsigned char *capture_rgb(int *out_w, int *out_h) {
     /* whole virtual desktop: covers every monitor, including negative origins */
     int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -150,6 +187,10 @@ static void apply_input(const char *msg, int w, int h) {
         in.ki.wScan = (WORD)MapVirtualKey((UINT)code, MAPVK_VK_TO_VSC);
         in.ki.dwFlags = KEYEVENTF_SCANCODE | (down == 0 ? KEYEVENTF_KEYUP : 0);
         SendInput(1, &in, sizeof(INPUT));
+    } else if (json_str_is(msg, "\"t\"", "txt")) {
+        char txt[1200];
+        json_str(msg, "\"text\"", txt, sizeof(txt));
+        type_text(txt);
     }
     (void)w;
     (void)h;

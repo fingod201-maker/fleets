@@ -9,6 +9,7 @@
 #include <jpeglib.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/keysym.h>
 #include <X11/extensions/XTest.h>
 
 #include "../ws.h"
@@ -32,6 +33,45 @@ static int json_num(const char *s, const char *key, double *out) {
     while (*p == ' ' || *p == ':' || *p == '"') p++;
     *out = strtod(p, NULL);
     return 1;
+}
+
+static void json_str(const char *s, const char *key, char *out, size_t cap) {
+    out[0] = 0;
+    const char *p = strstr(s, key);
+    if (!p) return;
+    p += strlen(key);
+    while (*p == ' ' || *p == ':' || *p == '\t') p++;
+    if (*p != '"') return;
+    p++;
+    size_t o = 0;
+    while (*p && *p != '"' && o + 1 < cap) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            if (*p == 'n') { out[o++] = '\n'; p++; continue; }
+            if (*p == 't') { out[o++] = '\t'; p++; continue; }
+        }
+        out[o++] = *p++;
+    }
+    out[o] = 0;
+}
+
+static void type_text(Display *dpy, const char *txt) {
+    KeyCode shift = XKeysymToKeycode(dpy, XK_Shift_L);
+    for (const unsigned char *p = (const unsigned char *)txt; p && *p; p++) {
+        KeySym ks;
+        if (*p == ' ') ks = XK_space;
+        else if (*p == '\n') ks = XK_Return;
+        else { char s[2] = {(char)*p, 0}; ks = XStringToKeysym(s); }
+        if (ks == NoSymbol) continue;
+        KeyCode kc = XKeysymToKeycode(dpy, ks);
+        if (!kc) continue;
+        int need_shift = (*p >= 'A' && *p <= 'Z');
+        if (need_shift) XTestFakeKeyEvent(dpy, shift, True, 0);
+        XTestFakeKeyEvent(dpy, kc, True, 0);
+        XTestFakeKeyEvent(dpy, kc, False, 0);
+        if (need_shift) XTestFakeKeyEvent(dpy, shift, False, 0);
+    }
+    XFlush(dpy);
 }
 
 static int shift_of(unsigned long mask) {
@@ -122,6 +162,10 @@ static void apply_input(Display *dpy, const char *msg, int w, int h) {
     } else if (json_str_is(msg, "\"t\"", "k") && json_num(msg, "\"code\"", &code)) {
         json_num(msg, "\"down\"", &down);
         XTestFakeKeyEvent(dpy, (unsigned)code, down != 0, 0);
+    } else if (json_str_is(msg, "\"t\"", "txt")) {
+        char txt[1024];
+        json_str(msg, "\"text\"", txt, sizeof(txt));
+        type_text(dpy, txt);
     }
     XFlush(dpy);
 }

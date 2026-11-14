@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fleet viewer - {{ session_host or session_id[:8] }}</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0c10;color:#e9ecf3;font:13px/1.4 'Segoe UI',system-ui,sans-serif}
+  .vbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#10141c;border-bottom:1px solid #1e2430;flex-wrap:wrap}
+  .vtitle{font-weight:600;margin-right:8px}
+  .vbar button{border:1px solid #2a3342;background:#171d27;color:#dfe5f0;border-radius:7px;padding:6px 10px;font:inherit;cursor:pointer}
+  .vbar button:hover{background:#1d2532}
+  .vbar button.on{background:#2d8cff;border-color:#2d8cff;color:#fff}
+  .vstatus{margin-left:auto;color:#8fb6ff;font-size:12px}
+  .vstage{position:relative;display:flex;align-items:center;justify-content:center;height:calc(100vh - 47px);overflow:auto;padding:8px;box-sizing:border-box}
+  #v-canvas{max-width:100%;max-height:100%;background:#000;cursor:none;outline:none;border-radius:6px;box-shadow:0 18px 50px -30px #000}
+  .vcursor{position:fixed;width:12px;height:12px;margin:-6px 0 0 -6px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #000,0 0 8px #2d8cff;pointer-events:none;display:none;z-index:9999}
+  .vhint{position:absolute;left:10px;bottom:8px;color:#6b7a92;font-size:11px}
+</style>
+</head>
+<body>
+<div class="vbar">
+  <span class="vtitle">{{ session_host or session_id[:8] }} · {{ mode }}</span>
+  <button id="v-ctrlaltdel" title="Ctrl+Alt+Del">Ctrl+Alt+Del</button>
+  <button id="v-alttab" title="Alt+Tab">Alt+Tab</button>
+  <button id="v-win" title="Windows key">Win</button>
+  <button id="v-esc" title="Escape">Esc</button>
+  <button id="v-type" title="Type text">Type…</button>
+  <button id="v-paste" title="Paste clipboard">Paste</button>
+  <button id="v-kb" title="Toggle keyboard capture">Keyboard: on</button>
+  <button id="v-full" title="Fullscreen">Fullscreen</button>
+  <span class="vstatus" id="v-status">connecting…</span>
+</div>
+<div class="vstage">
+  <canvas id="v-canvas" width="1280" height="720" tabindex="0"></canvas>
+  <div class="vhint">click the screen, then type. Mouse and keyboard control the remote PC.</div>
+</div>
+<div class="vcursor" id="v-cursor"></div>
+<script>window.__VIEWER = {sid: "{{ session_id }}", mode: "{{ mode }}"};</script>
+<script src="/static/viewer.js?v=20261114e"></script>
+</body>
+</html>

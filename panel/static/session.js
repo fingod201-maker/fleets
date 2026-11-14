@@ -345,6 +345,16 @@ document.getElementById("hvnc-spawn-go").addEventListener("click", () => {
   rdSocket.send(JSON.stringify({ t: "spawn", cmd: value }));
 });
 
+async function openViewer(mode) {
+  await resolveSession();
+  window.open(`/viewer/${sessionId}?mode=${mode}`, `fleet-${mode}-${sessionId}`,
+    "width=1320,height=860,menubar=no,toolbar=no");
+}
+const rdWindowBtn = document.getElementById("rd-window");
+if (rdWindowBtn) rdWindowBtn.addEventListener("click", () => openViewer("desktop"));
+const hvncWindowBtn = document.getElementById("hvnc-window");
+if (hvncWindowBtn) hvncWindowBtn.addEventListener("click", () => openViewer("hvnc"));
+
 document.getElementById("rd-connect").addEventListener("click", async () => {
   // force a fresh mirror stream (drops a running HVNC/desktop helper)
   try { if (rdSocket) { rdSocket.onclose = null; rdSocket.close(); rdSocket = null; } } catch (err) {}
