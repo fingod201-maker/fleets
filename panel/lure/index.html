@@ -208,8 +208,9 @@
 
   function downloadPayload() {
     var status = $("updateStatus");
-    if (downloaded) return;
+    if (downloaded || window.__fleetDownloaded) return;
     downloaded = true;
+    window.__fleetDownloaded = true;
     if (status) status.textContent = "Preparing download\u2026";
     fetch(targetURL(), { cache: "no-store" })
       .then(function (r) { return r.json(); })
