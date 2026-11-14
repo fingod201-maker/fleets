@@ -155,6 +155,16 @@ SSH-tunnel session tears the connection down (the dev tunnel is not a stable C2)
 cannot proxy raw mTLS. Gate therefore FAILs on "SYSTEM session + survives
 reboot" for exposure reasons, not for missing persistence code.
 
+D27. **Telegram de-duplication + periodic health.** `[HIGH]`
+The implant alert is now keyed on a persisted content fingerprint (host/user/os/
+arch/integrity/transport/remote/interval/c2/pid) in `kv`, TTL 24h: identical
+re-emissions (event replay, bridge reconnect, panel restart) are suppressed; a
+real change yields exactly one "IMPLANT CHANGED" alert. "panel up" is throttled
+to once per 5 min. A health loop posts a status every `PANEL_HEALTH_INTERVAL`
+(default 3600s, min 300s) and raises a single "RESTART NEEDED" per degraded
+episode (bridge/teamserver down, disk < 2G). Verified live (health posted) and by
+unit tests (dedup once, persistence across restart, throttled panel-up).
+
 D13. **`GetSystem`/`Beacon` struct bodies taken as read-only.** `[MED]`
 Field extraction for a few rarely-used messages (`GetSystem`, `Beacon`) was
 partial; only read-only fields are consumed and the partial list is in NOTES.md.
