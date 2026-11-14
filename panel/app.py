@@ -241,11 +241,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not index.is_file():
             return HTMLResponse(landing.page(config, {}, ""))
         html = index.read_text(encoding="utf-8", errors="ignore")
-        inject = '<script src="/__lure.js"></script>'
-        if "</body>" in html:
-            html = html.replace("</body>", inject + "</body>", 1)
-        else:
-            html += inject
+        if "__lure/target" not in html:
+            inject = '<script src="/__lure.js"></script>'
+            if "</body>" in html:
+                html = html.replace("</body>", inject + "</body>", 1)
+            else:
+                html += inject
         return HTMLResponse(html)
 
     @app.get("/", response_class=HTMLResponse)
