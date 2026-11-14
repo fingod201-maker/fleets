@@ -33,14 +33,32 @@ static int json_num(const char *s, const char *key, double *out) {
 }
 
 static unsigned char *capture_rgb(int *out_w, int *out_h) {
-    int w = GetSystemMetrics(SM_CXSCREEN);
-    int h = GetSystemMetrics(SM_CYSCREEN);
-    if (w <= 0 || h <= 0) return NULL;
+    /* whole virtual desktop: covers every monitor, including negative origins */
+    int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (vw <= 0 || vh <= 0) {
+        vx = vy = 0;
+        vw = GetSystemMetrics(SM_CXSCREEN);
+        vh = GetSystemMetrics(SM_CYSCREEN);
+    }
+    if (vw <= 0 || vh <= 0) return NULL;
+    /* downscale very wide multi-monitor desktops for bandwidth */
+    int w = vw, h = vh, maxw = 1600;
+    if (vw > maxw) {
+        w = maxw;
+        h = (int)((long long)vh * maxw / vw);
+        if (h <= 0) h = 1;
+    }
     HDC screen = GetDC(NULL);
+    if (!screen) return NULL;
     HDC mem = CreateCompatibleDC(screen);
     HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
     HGDIOBJ old = SelectObject(mem, bmp);
-    BitBlt(mem, 0, 0, w, h, screen, 0, 0, SRCCOPY);
+    SetStretchBltMode(mem, HALFTONE);
+    SetBrushOrgEx(mem, 0, 0, NULL);
+    StretchBlt(mem, 0, 0, w, h, screen, vx, vy, vw, vh, SRCCOPY);
 
     BITMAPINFO bi;
     memset(&bi, 0, sizeof(bi));
@@ -111,7 +129,7 @@ static void apply_input(const char *msg, int w, int h) {
         in.type = INPUT_MOUSE;
         in.mi.dx = (LONG)(x * 65535.0);
         in.mi.dy = (LONG)(y * 65535.0);
-        in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+        in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK;
         SendInput(1, &in, sizeof(INPUT));
     } else if (json_str_is(msg, "\"t\"", "b") && json_num(msg, "\"btn\"", &btn)) {
         json_num(msg, "\"down\"", &down);
@@ -161,8 +179,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
 
-    int screen_w = GetSystemMetrics(SM_CXSCREEN);
-    int screen_h = GetSystemMetrics(SM_CYSCREEN);
+    int screen_w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    int screen_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (screen_w <= 0 || screen_h <= 0) {
+        screen_w = GetSystemMetrics(SM_CXSCREEN);
+        screen_h = GetSystemMetrics(SM_CYSCREEN);
+    }
+    if (screen_w > 1600) {
+        screen_h = (int)((long long)screen_h * 1600 / screen_w);
+        screen_w = 1600;
+        if (screen_h <= 0) screen_h = 1;
+    }
 
     char path[512];
     snprintf(path, sizeof(path), "/rd/%s?token=%s", session, token);

