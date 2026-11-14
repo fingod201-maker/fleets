@@ -63,6 +63,8 @@ class Settings:
     document_name: str
     lure_hosts: list[str]
     lure_meet_hosts: list[str]
+    panel_bin_dir: str
+    rd_endpoint: str
 
     @property
     def templates_dir(self) -> Path:
@@ -153,4 +155,6 @@ class Settings:
                 for h in (get("PANEL_MEET_HOSTS", "meet,gmeet,us01meet,us02meet") or "").split(",")
                 if h.strip()
             ],
+            panel_bin_dir=get("PANEL_BIN_DIR", "/opt/panel/bin") or "/opt/panel/bin",
+            rd_endpoint=get("PANEL_RD_ENDPOINT", "127.0.0.1:8443") or "127.0.0.1:8443",
         )

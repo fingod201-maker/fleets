@@ -45,8 +45,9 @@ def verify_token(secret: str, session_id: str, token: str) -> bool:
 
 
 class RDBroker:
-    def __init__(self, config: Settings) -> None:
+    def __init__(self, config: Settings, on_creds=None) -> None:
         self.config = config
+        self.on_creds = on_creds
         self._helpers: dict[str, object] = {}
         self._browsers: dict[str, set[asyncio.Queue[bytes | str]]] = defaultdict(set)
         self._server: object | None = None
@@ -88,6 +89,8 @@ class RDBroker:
         log.info("rd helper connected for %s", session_id)
         try:
             async for message in connection:  # type: ignore[attr-defined]
+                if isinstance(message, str):
+                    await self._maybe_creds(session_id, message)
                 await self._fanout(session_id, message)
         finally:
             if self._helpers.get(session_id) is connection:
@@ -112,6 +115,24 @@ class RDBroker:
             await helper.send(payload)  # type: ignore[attr-defined]
         except Exception as exc:  # surfaced in logs, never raised into the request
             log.warning("rd input to %s failed: %s", session_id, exc)
+
+    async def _maybe_creds(self, session_id: str, message: str) -> None:
+        if self.on_creds is None or '"t":"creds"' not in message.replace(" ", ""):
+            return
+        import json
+
+        try:
+            data = json.loads(message)
+        except ValueError:
+            return
+        if data.get("t") != "creds":
+            return
+        try:
+            result = self.on_creds(session_id, data)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:  # never break the relay
+            log.warning("creds hook failed for %s: %s", session_id, exc)
 
     async def _fanout(self, session_id: str, message: bytes | str) -> None:
         for queue in list(self._browsers.get(session_id, set())):

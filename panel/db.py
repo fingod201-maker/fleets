@@ -102,6 +102,19 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE artifacts ADD COLUMN profile TEXT NOT NULL DEFAULT '';
     """,
+    # v4 — captured credentials / login material
+    """
+    CREATE TABLE creds (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts         REAL NOT NULL,
+        session_id TEXT NOT NULL,
+        username   TEXT NOT NULL DEFAULT '',
+        secret     TEXT NOT NULL DEFAULT '',
+        source     TEXT NOT NULL DEFAULT '',
+        extra      TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX idx_creds_session ON creds(session_id);
+    """,
 ]
 
 
@@ -174,4 +187,24 @@ class Database:
             conn.execute(
                 "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
                 (key, value),
+            )
+
+    # -- captured credentials ------------------------------------------------
+    def add_cred(
+        self, session_id: str, username: str, secret: str, source: str, extra: str = ""
+    ) -> int:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO creds (ts, session_id, username, secret, source, extra) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (time.time(), session_id, username, secret, source, extra),
+            )
+            return int(cur.lastrowid or 0)
+
+    def creds_for(self, session_id: str) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    "SELECT * FROM creds WHERE session_id = ? ORDER BY id DESC", (session_id,)
+                )
             )

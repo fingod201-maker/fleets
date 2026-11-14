@@ -39,6 +39,8 @@ def _base_settings():
         document_name="doc",
         lure_hosts=["get"],
         lure_meet_hosts=["meet"],
+        panel_bin_dir="/opt/panel/bin",
+        rd_endpoint="127.0.0.1:8443",
     )
 
 

