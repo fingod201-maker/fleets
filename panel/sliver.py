@@ -133,6 +133,16 @@ class SliverBridge:
     def rename(self, session_id: str, name: str) -> dict[str, Any]:
         return self._json("POST", f"/sliver/session/{session_id}/rename", json={"name": name})
 
+    def persist(
+        self, session_id: str, file_path: str = "", name: str = "WinUpdateSvc"
+    ) -> dict[str, Any]:
+        return self._json(
+            "POST",
+            f"/sliver/session/{session_id}/persist",
+            timeout=120.0,
+            json={"file_path": file_path, "name": name},
+        )
+
     # -- builds --------------------------------------------------------------
     def generate(self, payload: dict[str, Any], timeout: float = 600.0) -> dict[str, Any]:
         return self._json("POST", "/sliver/generate", timeout=timeout, json=payload)

@@ -37,6 +37,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sliver/session/{id}/ifconfig", s.ifconfig)
 	mux.HandleFunc("GET /sliver/session/{id}/getsystem", s.getsystem)
 	mux.HandleFunc("POST /sliver/session/{id}/rename", s.rename)
+	mux.HandleFunc("POST /sliver/session/{id}/persist", s.persist)
 
 	mux.HandleFunc("POST /sliver/generate", s.generate)
 
