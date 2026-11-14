@@ -139,16 +139,21 @@
     var tag = (el.tagName || "").toLowerCase();
     return tag === "input" || tag === "textarea";
   }
+  function printable(ev) {
+    return ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  }
   document.addEventListener("keydown", function (ev) {
     if (!kbOn || typingTarget(ev.target)) return;
     if (ev.key === "F5" || ev.key === "F12") return;
     ev.preventDefault();
+    if (printable(ev)) { send({ t: "txt", text: ev.key }); return; }
     key(ev.keyCode, 1);
   }, true);
   document.addEventListener("keyup", function (ev) {
     if (!kbOn || typingTarget(ev.target)) return;
     if (ev.key === "F5" || ev.key === "F12") return;
     ev.preventDefault();
+    if (printable(ev)) return;
     key(ev.keyCode, 0);
   }, true);
   window.addEventListener("beforeunload", function () {

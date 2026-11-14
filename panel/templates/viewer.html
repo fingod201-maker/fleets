@@ -13,7 +13,7 @@
   .vbar button.on{background:#2d8cff;border-color:#2d8cff;color:#fff}
   .vstatus{margin-left:auto;color:#8fb6ff;font-size:12px}
   .vstage{position:relative;display:flex;align-items:center;justify-content:center;height:calc(100vh - 47px);overflow:auto;padding:8px;box-sizing:border-box}
-  #v-canvas{max-width:100%;max-height:100%;background:#000;cursor:none;outline:none;border-radius:6px;box-shadow:0 18px 50px -30px #000}
+  #v-canvas{width:auto;height:auto;max-width:100%;max-height:100%;background:#000;cursor:none;outline:none;border-radius:6px;box-shadow:0 18px 50px -30px #000}
   .vcursor{position:fixed;width:12px;height:12px;margin:-6px 0 0 -6px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #000,0 0 8px #2d8cff;pointer-events:none;display:none;z-index:9999}
   .vhint{position:absolute;left:10px;bottom:8px;color:#6b7a92;font-size:11px}
 </style>
@@ -37,6 +37,6 @@
 </div>
 <div class="vcursor" id="v-cursor"></div>
 <script>window.__VIEWER = {sid: "{{ session_id }}", mode: "{{ mode }}"};</script>
-<script src="/static/viewer.js?v=20261114f"></script>
+<script src="/static/viewer.js?v=20261114g"></script>
 </body>
 </html>

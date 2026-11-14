@@ -118,7 +118,7 @@ class BuildRequest:
     transport: str = "mtls"
     c2_url: str = ""
     evasion: bool = True
-    beacon: bool = True
+    beacon: bool = False
     interval: int = 60
     jitter: int = 35
     base_url: str = ""
@@ -411,7 +411,7 @@ def load_build_request(form: dict[str, str], config: Settings) -> BuildRequest:
         transport=form.get("transport") or "mtls",
         c2_url=form.get("c2_url") or "",
         evasion=form.get("evasion", "1") not in {"0", "false", "no"},
-        beacon=form.get("beacon", "1") not in {"0", "false", "no"},
+        beacon=form.get("beacon", "0") not in {"0", "false", "no"},
         interval=int(form.get("interval") or "60"),
         jitter=int(form.get("jitter") or "35"),
         base_url=base_url.rstrip("/"),

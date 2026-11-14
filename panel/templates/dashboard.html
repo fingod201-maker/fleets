@@ -31,7 +31,7 @@
     <tbody>
     {% for s in implants[0] %}
       <tr data-id="{{ s.id }}" class="{{ 'alive' if s.alive else 'dead' }}">
-        <td><a href="/s/{{ s.id }}">{{ s.host }}</a></td>
+        <td><a href="/s/{{ s.id }}">{{ s.host }}</a>{% if s.is_beacon %} <span class="dim">(beacon)</span>{% endif %}</td>
         <td>{{ s.os }}</td>
         <td>{{ s.arch }}</td>
         <td>{{ s.user }}</td>

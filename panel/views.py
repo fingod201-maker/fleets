@@ -92,6 +92,29 @@ class BridgeViews:
                     "local_ips": local_ips,
                     "age": human_age(now - last) if last else "-",
                     "alive": (now - last) < 300 if last else False,
+                    "is_beacon": False,
+                }
+            )
+        beacons_fn = getattr(self.bridge, "beacons", None)
+        beacons: list[dict[str, Any]] = []
+        if beacons_fn is not None:
+            try:
+                beacons = await run_in_threadpool(beacons_fn)
+            except BridgeError:
+                beacons = []
+        for item in beacons:
+            last = float(item.get("last_checkin", 0) or 0)
+            interval = float(item.get("interval", 0) or 0)
+            sessions.append(
+                {
+                    **item,
+                    "tags": ["beacon"],
+                    "public_ip": "",
+                    "local_ips": "",
+                    "age": human_age(now - last) if last else "-",
+                    "alive": (now - last) < max(300, interval * 3) if last else False,
+                    "reconnect_interval": item.get("interval", 0),
+                    "is_beacon": True,
                 }
             )
         sessions.sort(key=lambda s: s.get("host", ""))

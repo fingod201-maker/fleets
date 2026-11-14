@@ -147,8 +147,17 @@ async function connectDesktop(skipLaunch) {
     lastWheel = now;
     send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
   };
-  canvas.onkeydown = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 1 }); };
-  canvas.onkeyup = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 0 }); };
+  const printableKey = (ev) => ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  canvas.onkeydown = (ev) => {
+    ev.preventDefault();
+    if (printableKey(ev)) { send({ t: "txt", text: ev.key }); return; }
+    send({ t: "k", code: ev.keyCode, down: 1 });
+  };
+  canvas.onkeyup = (ev) => {
+    ev.preventDefault();
+    if (printableKey(ev)) return;
+    send({ t: "k", code: ev.keyCode, down: 0 });
+  };
 
   // if binary WS frames don't arrive (proxy/CDN/browser), fall back to snapshots
   setTimeout(function () {

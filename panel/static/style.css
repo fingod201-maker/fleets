@@ -82,7 +82,7 @@ label.check { flex-direction: row; align-items: center; gap: 8px; }
 .panel { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 480px; }
 .hidden { display: none; }
 .rd-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
-#rd-canvas { border: 1px solid var(--line); background: #000; max-width: 100%; cursor: crosshair; }
+#rd-canvas { border: 1px solid var(--line); background: #000; max-width: 100%; max-height: calc(100vh - 240px); cursor: crosshair; }
 #term { height: 70vh; }
 #files-path { background: #0d1117; color: var(--fg); border: 1px solid var(--line); padding: 4px; font: inherit; }
 .footer { height: 32px; }

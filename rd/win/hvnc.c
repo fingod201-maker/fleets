@@ -254,23 +254,31 @@ static unsigned char *capture_rgb(void) {
     return rgb;
 }
 
+static volatile LONG g_stop = 0;
+
+static DWORD WINAPI input_loop(LPVOID arg) {
+    (void)arg;
+    SetThreadDesktop(g_hdesk);
+    char buf[8192];
+    while (!g_stop) {
+        if (ws_wait(&g_ws, 100000) == 1) {
+            int op = 0;
+            long n = ws_recv(&g_ws, buf, sizeof(buf) - 1, &op);
+            if (n <= 0) { g_stop = 1; break; }
+            buf[n] = 0;
+            if (op == 1) inject_input(buf);
+        }
+    }
+    return 0;
+}
+
 static DWORD WINAPI worker(LPVOID arg) {
     (void)arg;
     SetThreadDesktop(g_hdesk);
     lg("worker start");
-    char inbuf[8192];
     int logged = 0;
-    int closed = 0;
     for (;;) {
-        for (int k = 0; k < 128; k++) {
-            if (ws_wait(&g_ws, 0) != 1) break;
-            int op = 0;
-            long n = ws_recv(&g_ws, inbuf, sizeof(inbuf) - 1, &op);
-            if (n <= 0) { closed = 1; break; }
-            inbuf[n] = 0;
-            if (op == 1) inject_input(inbuf);
-        }
-        if (closed) break;
+        if (g_stop) break;
         forward_creds();
 
         unsigned char *rgb = capture_rgb();
@@ -298,6 +306,7 @@ static DWORD WINAPI worker(LPVOID arg) {
 
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     (void)inst; (void)prev; (void)cmd; (void)show;
+    SetProcessDPIAware(); /* physical pixels for capture + input */
     const char *host = "127.0.0.1";
     const char *session = "session";
     const char *token = "";
@@ -394,7 +403,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     }
 
     HANDLE th = CreateThread(NULL, 0, worker, NULL, 0, NULL);
+    HANDLE ith = CreateThread(NULL, 0, input_loop, NULL, 0, NULL);
     if (th) WaitForSingleObject(th, INFINITE);
+    g_stop = 1;
+    if (ith) { WaitForSingleObject(ith, 2000); CloseHandle(ith); }
+    if (th) CloseHandle(th);
     ws_close(&g_ws);
     WSACleanup();
     return 0;

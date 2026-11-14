@@ -196,8 +196,27 @@ static void apply_input(const char *msg, int w, int h) {
     (void)h;
 }
 
+static ws_t g_ws;
+static volatile LONG g_stop = 0;
+
+static DWORD WINAPI input_loop(LPVOID arg) {
+    (void)arg;
+    char buf[8192];
+    while (!g_stop) {
+        if (ws_wait(&g_ws, 100000) == 1) {
+            int op = 0;
+            long n = ws_recv(&g_ws, buf, sizeof(buf) - 1, &op);
+            if (n <= 0) { g_stop = 1; break; }
+            buf[n] = 0;
+            if (op == 1) apply_input(buf, 0, 0);
+        }
+    }
+    return 0;
+}
+
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     (void)inst; (void)prev; (void)cmd; (void)show;
+    SetProcessDPIAware(); /* physical pixels: capture and SendInput must agree */
     const char *host = "127.0.0.1";
     const char *session = "session";
     const char *token = "";
@@ -235,9 +254,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     char path[512];
     snprintf(path, sizeof(path), "/rd/%s?token=%s", session, token);
 
-    ws_t ws;
-    ws.fd = WS_INVALID;
-    if (ws_connect(&ws, host, port, path) != 0) {
+    g_ws.fd = WS_INVALID;
+    if (ws_connect(&g_ws, host, port, path) != 0) {
         fprintf(stderr, "rd-win: cannot connect\n");
         return 1;
     }
@@ -247,22 +265,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
              "{\"t\":\"hello\",\"os\":\"windows\",\"w\":%d,\"h\":%d,\"view_only\":false,"
              "\"mode\":\"desktop\",\"caps\":[\"desktop\",\"input\"],\"hvnc\":false}", screen_w,
              screen_h);
-    ws_send(&ws, hello, strlen(hello), 1);
+    ws_send(&g_ws, hello, strlen(hello), 1);
 
-    char inbuf[8192];
     long delay = 80000;
-    int closed = 0;
+    g_stop = 0;
+    HANDLE th = CreateThread(NULL, 0, input_loop, NULL, 0, NULL);
     for (;;) {
-        /* drain every pending input message so pointer/keyboard stay responsive */
-        for (int k = 0; k < 128; k++) {
-            if (ws_wait(&ws, 0) != 1) break;
-            int op = 0;
-            long n = ws_recv(&ws, inbuf, sizeof(inbuf) - 1, &op);
-            if (n <= 0) { closed = 1; break; }
-            inbuf[n] = 0;
-            if (op == 1) apply_input(inbuf, 0, 0);
-        }
-        if (closed) break;
+        if (g_stop) break;
         int w = 0, h = 0;
         unsigned char *rgb = capture_rgb(&w, &h);
         if (!rgb) {
@@ -281,7 +290,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
             continue;
         }
         DWORD start = GetTickCount();
-        int rc = ws_send(&ws, mb.data, mb.len, 2);
+        int rc = ws_send(&g_ws, mb.data, mb.len, 2);
         free(mb.data);
         if (rc != 0) break;
         DWORD elapsed = GetTickCount() - start;
@@ -289,7 +298,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         else if (elapsed < 40) delay = 80000;
         Sleep((DWORD)(delay / 1000));
     }
-    ws_close(&ws);
+    g_stop = 1;
+    if (th) { WaitForSingleObject(th, 2000); CloseHandle(th); }
+    ws_close(&g_ws);
     WSACleanup();
     return 0;
 }
