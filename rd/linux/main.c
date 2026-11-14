@@ -151,8 +151,9 @@ int main(int argc, char **argv) {
 
     char hello[256];
     snprintf(hello, sizeof(hello),
-             "{\"t\":\"hello\",\"os\":\"linux\",\"w\":%d,\"h\":%d,\"view_only\":%s}", w, h,
-             view_only ? "true" : "false");
+             "{\"t\":\"hello\",\"os\":\"linux\",\"w\":%d,\"h\":%d,\"view_only\":%s,"
+             "\"mode\":\"desktop\",\"caps\":[\"desktop\",\"input\"],\"hvnc\":false}",
+             w, h, view_only ? "true" : "false");
     ws_send(&ws, hello, strlen(hello), 1);
 
     if (view_only) {

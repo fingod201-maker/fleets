@@ -3,8 +3,9 @@
 	admin off
 }
 
-# __DOMAIN__ is replaced by deploy.sh (sslip.io by default, or panel.<zone>).
-__DOMAIN__ {
+# Loopback reverse proxy only. Public TLS is terminated by the Cloudflare Tunnel
+# (origin :8000). :443 on the host is reserved for the durable Sliver mTLS C2.
+http://127.0.0.1:8080 {
 	encode gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"

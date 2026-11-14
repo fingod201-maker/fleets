@@ -1,0 +1,15 @@
+[Unit]
+Description=fleet sliver listeners (durable C2)
+After=network-online.target fleet-sliver.service
+Wants=network-online.target
+Requires=fleet-sliver.service
+
+[Service]
+Type=oneshot
+User=opc
+Group=opc
+ExecStart=/opt/panel/bin/start-listeners.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

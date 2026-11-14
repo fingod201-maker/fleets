@@ -45,7 +45,18 @@ function connectDesktop() {
         if (msg.t === "hello") {
           canvas.width = msg.w || canvas.width;
           canvas.height = msg.h || canvas.height;
-          status.textContent = msg.view_only ? "view only (no DISPLAY)" : "streaming";
+          window.__rdCaps = msg.caps || [];
+          const hvncBtn = document.getElementById("hvnc-start");
+          if (msg.hvnc === false) {
+            hvncBtn.disabled = true;
+            hvncBtn.title = msg.reason || "HVNC unavailable for this helper";
+            status.textContent = msg.reason || "HVNC unavailable";
+          } else if ((msg.caps || []).includes("hvnc")) {
+            hvncBtn.disabled = false;
+            hvncBtn.title = "hidden desktop available";
+          }
+          if (msg.view_only) status.textContent = "view only (no DISPLAY)";
+          else if (msg.hvnc !== false) status.textContent = "streaming (" + (msg.mode || "desktop") + ")";
         }
       } catch (err) { /* non-fatal */ }
       return;

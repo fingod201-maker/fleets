@@ -179,6 +179,12 @@ build_all() {
       https://github.com/BishopFox/sliver/releases/download/v1.7.9/sliver-server_linux-amd64
     chmod +x "$SLIVER_BIN"
   fi
+  if [ ! -x "$PANEL_ROOT/bin/sliver-client" ]; then
+    curl -fsSL -o "$PANEL_ROOT/bin/sliver-client" \
+      https://github.com/BishopFox/sliver/releases/download/v1.7.9/sliver-client_linux-amd64
+    chmod +x "$PANEL_ROOT/bin/sliver-client"
+  fi
+  install -m 0755 "$REPO_DIR/deploy/start-listeners.sh" "$PANEL_ROOT/bin/start-listeners.sh"
   python3 -m venv "$VENV"
   "$VENV/bin/pip" install -q --upgrade pip
   "$VENV/bin/pip" install -q -r "$REPO_DIR/panel/requirements.txt"
@@ -204,8 +210,9 @@ install_units() {
     cp "$unit" /etc/systemd/system/
   done
   systemctl daemon-reload
-  systemctl enable fleet-sliver.service fleet-bridge.service fleet-panel.service caddy.service >/dev/null 2>&1
+  systemctl enable fleet-sliver.service fleet-listeners.service fleet-bridge.service fleet-panel.service caddy.service >/dev/null 2>&1
   systemctl restart fleet-sliver.service fleet-bridge.service fleet-panel.service caddy.service
+  systemctl restart fleet-listeners.service >/dev/null 2>&1 || true
   # host-default cloudflared unit (another tenant owns it on this box)
   systemctl restart cloudflared.service >/dev/null 2>&1 || true
   if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
@@ -258,6 +265,10 @@ run_check() {
   systemctl is-enabled --quiet fleet-healthcheck.timer 2>/dev/null && ok "healthcheck timer" || bad "healthcheck timer"
   local domain
   domain="$(domain_name)"
+  if [ -n "${CF_TUNNEL_TOKEN:-}" ] && [ -n "${CF_ZONE_NAME:-}" ]; then
+    # panel.<zone> is behind Access (302); use the public lure host for TLS liveness
+    domain="get.${CF_ZONE_NAME}"
+  fi
   curl -fsS --max-time 12 -o /dev/null "https://${domain}/healthz" 2>/dev/null && ok "public TLS ${domain}" || bad "public TLS ${domain}"
   if [ -n "${CF_API_TOKEN:-}" ] && [ -n "${CF_ZONE_NAME:-}" ]; then
     local zresp

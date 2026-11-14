@@ -167,7 +167,8 @@ int main(int argc, char **argv) {
 
     char hello[256];
     snprintf(hello, sizeof(hello),
-             "{\"t\":\"hello\",\"os\":\"windows\",\"w\":%d,\"h\":%d,\"view_only\":false}", screen_w,
+             "{\"t\":\"hello\",\"os\":\"windows\",\"w\":%d,\"h\":%d,\"view_only\":false,"
+             "\"mode\":\"desktop\",\"caps\":[\"desktop\",\"input\"],\"hvnc\":false}", screen_w,
              screen_h);
     ws_send(&ws, hello, strlen(hello), 1);
 
