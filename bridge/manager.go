@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bishopfox/sliver/client/assets"
@@ -27,6 +28,15 @@ type Manager struct {
 	connected bool
 	lastErr   string
 	version   string
+	inflight  int32
+}
+
+// Begin/End bracket a long RPC so the monitor does not tear the connection
+// down (and cancel it) while a build is in flight.
+func (m *Manager) Begin() { atomic.AddInt32(&m.inflight, 1) }
+func (m *Manager) End()   { atomic.AddInt32(&m.inflight, -1) }
+func (m *Manager) busy() bool {
+	return atomic.LoadInt32(&m.inflight) > 0
 }
 
 func NewManager(cfg *Config, hub *Hub) *Manager {
@@ -125,7 +135,9 @@ func (m *Manager) monitor(ctx context.Context) {
 			if err != nil {
 				failures++
 				m.setDown(fmt.Sprintf("ping: %v", err))
-				if failures >= 2 {
+				// never tear down while a long RPC (build) is in flight; that
+				// would cancel the very request we are trying to finish.
+				if failures >= 3 && !m.busy() {
 					return
 				}
 			} else {

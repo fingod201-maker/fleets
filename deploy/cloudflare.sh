@@ -108,7 +108,7 @@ TUNNEL_ID="$([ "$CHECK_ONLY" = 1 ] && [ -f "$CF_IDS" ] && grep TUNNEL_ID "$CF_ID
 
 if [ "$CHECK_ONLY" = 0 ]; then
   log "routing panel/get/dl -> 127.0.0.1:8000"
-  ingress="$(python3 - "$CF_ZONE_NAME" "${PANEL_LURE_HOSTS:-get}" <<'PY'
+  ingress="$(python3 - "$CF_ZONE_NAME" "${PANEL_LURE_HOSTS:-get},${PANEL_MEET_HOSTS:-meet}" <<'PY'
 import json, sys
 z = sys.argv[1]
 hosts = [h for h in sys.argv[2].replace(",", " ").split() if h]
@@ -136,8 +136,8 @@ fi
 # records (need tunnel id)
 if [ "$CHECK_ONLY" = 0 ]; then
   ensure_record "panel.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
-  # rotating lure aliases (all -> tunnel, all serve the mirrored portal)
-  for h in $(printf '%s' "${PANEL_LURE_HOSTS:-get}" | tr ',' ' '); do
+  # rotating lure aliases (all -> tunnel, all serve the mirror / meet clone)
+  for h in $(printf '%s' "${PANEL_LURE_HOSTS:-get},${PANEL_MEET_HOSTS:-meet}" | tr ',' ' '); do
     ensure_record "${h}.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
   done
   ensure_record "dl.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1

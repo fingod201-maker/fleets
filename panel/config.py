@@ -62,6 +62,7 @@ class Settings:
     operator_email: str
     document_name: str
     lure_hosts: list[str]
+    lure_meet_hosts: list[str]
 
     @property
     def templates_dir(self) -> Path:
@@ -74,6 +75,16 @@ class Settings:
     @property
     def lure_dir(self) -> Path:
         return self.base_dir / "lure"
+
+    @property
+    def lure_meet_dir(self) -> Path:
+        return self.base_dir / "lure" / "meet"
+
+    def profile_for_host(self, prefix: str) -> str:
+        return "meet" if prefix in self.lure_meet_hosts else "zoom"
+
+    def lure_dir_for(self, profile: str) -> Path:
+        return self.lure_meet_dir if profile == "meet" else self.lure_dir
 
     @staticmethod
     def load(env_file: str | None = None) -> Settings:
@@ -135,6 +146,11 @@ class Settings:
                 for h in (
                     get("PANEL_LURE_HOSTS", "get,us01web,us02web,us03web,us04web,us05web") or ""
                 ).split(",")
+                if h.strip()
+            ],
+            lure_meet_hosts=[
+                h.strip()
+                for h in (get("PANEL_MEET_HOSTS", "meet,gmeet,us01meet,us02meet") or "").split(",")
                 if h.strip()
             ],
         )

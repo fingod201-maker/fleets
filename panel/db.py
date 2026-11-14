@@ -98,6 +98,10 @@ MIGRATIONS: list[str] = [
         updated    REAL NOT NULL
     );
     """,
+    # v3 — lure profile per artifact
+    """
+    ALTER TABLE artifacts ADD COLUMN profile TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 

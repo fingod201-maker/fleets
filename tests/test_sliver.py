@@ -38,6 +38,7 @@ def _base_settings():
         operator_email="",
         document_name="doc",
         lure_hosts=["get"],
+        lure_meet_hosts=["meet"],
     )
 
 

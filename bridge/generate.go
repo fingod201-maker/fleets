@@ -136,6 +136,9 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		_ = os.RemoveAll(srcDir)
 	}
 
+	s.mgr.Begin()
+	defer s.mgr.End()
+
 	ctx, cancel := context.WithTimeout(r.Context(), 600*time.Second)
 	defer cancel()
 	resp, err := client.Generate(ctx, &clientpb.GenerateReq{

