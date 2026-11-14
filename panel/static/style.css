@@ -86,3 +86,5 @@ label.check { flex-direction: row; align-items: center; gap: 8px; }
 #term { height: 70vh; }
 #files-path { background: #0d1117; color: var(--fg); border: 1px solid var(--line); padding: 4px; font: inherit; }
 .footer { height: 32px; }
+
+.rd-bar a.linkbtn { background: var(--accent); color: #fff; text-decoration: none; padding: 6px 10px; border-radius: 6px; font: inherit; }

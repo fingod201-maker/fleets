@@ -9,6 +9,9 @@ on:
       - "rd/stb_image_write.h"
       - ".github/workflows/macos-rd.yml"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
@@ -30,3 +33,10 @@ jobs:
           name: rd-mac
           path: rd-mac
           retention-days: 30
+      - name: Publish as release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rd-mac-latest
+          name: rd-mac-latest
+          make_latest: "false"
+          files: rd-mac

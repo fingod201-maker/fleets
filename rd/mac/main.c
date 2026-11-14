@@ -4,6 +4,7 @@
  * Built on macOS only (frameworks + stb_image_write). */
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,12 +111,33 @@ static void display_union(void) {
     g_uh = u.size.height > 0 ? u.size.height : 1;
 }
 
+typedef CGImageRef (*cg_window_image_fn)(CGRect, CGWindowListOption, CGWindowID,
+                                         CGWindowImageOption);
+typedef CGImageRef (*cg_display_image_fn)(CGDirectDisplayID);
+
+/* macOS 15 SDK marks these "unavailable" even though CoreGraphics still exports
+ * them; resolve at runtime so the same source builds on every SDK. */
+static CGImageRef composite_image(void) {
+    static cg_window_image_fn window_fn = NULL;
+    static cg_display_image_fn display_fn = NULL;
+    static int resolved = 0;
+    if (!resolved) {
+        resolved = 1;
+        window_fn = (cg_window_image_fn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+        display_fn = (cg_display_image_fn)dlsym(RTLD_DEFAULT, "CGDisplayCreateImage");
+    }
+    CGImageRef image = NULL;
+    if (window_fn) {
+        image = window_fn(CGRectInfinite, kCGWindowListOptionOnScreenOnly,
+                          kCGNullWindowID, kCGWindowImageDefault);
+    }
+    if (!image && display_fn) image = display_fn(CGMainDisplayID());
+    return image;
+}
+
 static unsigned char *capture_rgb(int *out_w, int *out_h) {
     /* composite of all displays (falls back to the main display) */
-    CGImageRef image = CGWindowListCreateImage(
-        CGRectInfinite, kCGWindowListOptionOnScreenOnly, kCGNullWindowID,
-        kCGWindowImageDefault);
-    if (!image) image = CGDisplayCreateImage(CGMainDisplayID());
+    CGImageRef image = composite_image();
     if (!image) return NULL;
     size_t w = CGImageGetWidth(image);
     size_t h = CGImageGetHeight(image);

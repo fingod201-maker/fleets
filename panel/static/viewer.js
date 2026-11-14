@@ -122,14 +122,23 @@
     ev.preventDefault();
     send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
   }, { passive: false });
-  canvas.addEventListener("keydown", function (ev) {
-    if (!kbOn) return;
-    ev.preventDefault(); key(ev.keyCode, 1);
-  });
-  canvas.addEventListener("keyup", function (ev) {
-    if (!kbOn) return;
-    ev.preventDefault(); key(ev.keyCode, 0);
-  });
+  function typingTarget(el) {
+    if (!el) return false;
+    var tag = (el.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea";
+  }
+  document.addEventListener("keydown", function (ev) {
+    if (!kbOn || typingTarget(ev.target)) return;
+    if (ev.key === "F5" || ev.key === "F12") return;
+    ev.preventDefault();
+    key(ev.keyCode, 1);
+  }, true);
+  document.addEventListener("keyup", function (ev) {
+    if (!kbOn || typingTarget(ev.target)) return;
+    if (ev.key === "F5" || ev.key === "F12") return;
+    ev.preventDefault();
+    key(ev.keyCode, 0);
+  }, true);
   window.addEventListener("beforeunload", function () {
     if (socket) { try { socket.close(); } catch (e) {} }
     if (pollTimer) clearInterval(pollTimer);
