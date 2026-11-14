@@ -50,6 +50,20 @@ static int g_w = 0, g_h = 0;
 static int g_mx = 0, g_my = 0;
 static long g_cred_off = 0;
 
+// collapse accidental double backslashes ("C:\\Users" -> "C:\Users")
+static void norm_slashes(char *s) {
+    char *w = s;
+    for (char *r = s; *r; r++) {
+        if (*r == '\\' && r[1] == '\\') {
+            *w++ = '\\';
+            r++;
+        } else {
+            *w++ = *r;
+        }
+    }
+    *w = 0;
+}
+
 static int json_str_is(const char *s, const char *key, const char *value) {
     const char *p = strstr(s, key);
     if (!p) return 0;
@@ -260,6 +274,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         }
         LocalFree(argv);
     }
+
+    norm_slashes(g_desktop);
+    norm_slashes(g_spawn);
+    norm_slashes(g_creds);
+    norm_slashes(g_prompt);
 
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);

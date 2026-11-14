@@ -17,6 +17,19 @@ static char g_title[128] = "Sign in";
 static HWND g_user;
 static HWND g_pass;
 
+static void norm_slashes(char *s) {
+    char *w = s;
+    for (char *r = s; *r; r++) {
+        if (*r == '\\' && r[1] == '\\') {
+            *w++ = '\\';
+            r++;
+        } else {
+            *w++ = *r;
+        }
+    }
+    *w = 0;
+}
+
 static void json_escape(const char *in, char *out, size_t cap) {
     size_t o = 0;
     for (size_t i = 0; in[i] && o + 2 < cap; i++) {
@@ -102,6 +115,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         }
         LocalFree(argv);
     }
+    norm_slashes(g_out);
+    norm_slashes(g_title);
 
     WNDCLASSA wc;
     memset(&wc, 0, sizeof(wc));

