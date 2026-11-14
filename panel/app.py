@@ -675,7 +675,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # catch-all for mirrored lure assets (/ _next/*, /sites/*, /favicon.ico, ...)
     @app.get("/{path:path}")
-    async def lure_asset(path: str):
+    async def lure_asset(request: Request, path: str):
+        # dl.<zone>/<artifact> (EXTRA D4: no /dl prefix on the dl host)
+        if host_prefix(request) == "dl":
+            artifact = config.artifacts_dir / path
+            if artifact.is_file():
+                media = mimetypes.guess_type(path)[0] or "application/octet-stream"
+                return FileResponse(
+                    artifact,
+                    filename=path,
+                    media_type=media,
+                    headers={"Cache-Control": "no-store"},
+                )
         for base in (config.lure_dir, config.lure_meet_dir, config.lure_dir.parent):
             candidate = base / path
             if candidate.is_file():
