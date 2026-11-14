@@ -140,6 +140,21 @@ binaries compile; the helper→broker→DB→API path is live (cred captured via
 scripted helper, 401 without auth, HVNC start reaches the upload step). Runtime
 hidden-desktop capture/input is **not** testable on Linux and is flagged as such.
 
+D26. **T3 result: PARTIAL — environmental blockers, not code.** `[HIGH]`
+With admin granted, the Defender exclusion worked, the Windows payload executed
+and `EXQUISITE` appeared as a live session with working operator `whoami`/
+`hostname`. The durable module (`rd/win/durable.ps1`) installed: hidden
+`C:\ProgramData\<GUID>\` with Hidden+System, two copies (`WinUpdateSvc.exe` +
+`MicrosoftEdgeUpdate.exe`), timestamps stomped from `svchost.exe`, an auto-start
+service `WinUpdateSvc` running as **NT AUTHORITY\SYSTEM**, `SeDebugPrivilege`
+enabled, and a WMI `__EventFilter`/`CommandLineEventConsumer` subscription.
+Not achieved: (1) a distinct SYSTEM *session* — `GetSystem` over the loopback
+SSH-tunnel session tears the connection down (the dev tunnel is not a stable C2);
+(2) reboot-survival proof — the only C2 reachable from this host is a dev SSH
+`-L 8888` tunnel that dies on reboot, because OCI blocks 8888 and Cloudflare
+cannot proxy raw mTLS. Gate therefore FAILs on "SYSTEM session + survives
+reboot" for exposure reasons, not for missing persistence code.
+
 D13. **`GetSystem`/`Beacon` struct bodies taken as read-only.** `[MED]`
 Field extraction for a few rarely-used messages (`GetSystem`, `Beacon`) was
 partial; only read-only fields are consumed and the partial list is in NOTES.md.
