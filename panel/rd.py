@@ -80,7 +80,9 @@ class RDBroker:
         parsed = urlparse(request.path)
         session_id = parsed.path.rsplit("/", 1)[-1]
         token = parse_qs(parsed.query).get("token", [""])[0]
-        if not verify_token(self.config.panel_secret, session_id, token):
+        ok = verify_token(self.config.panel_secret, session_id, token)
+        log.warning("rd helper handshake session=%s verified=%s", session_id[:8], ok)
+        if not ok:
             await connection.close(  # type: ignore[attr-defined]
                 code=4001, reason="bad rd token"
             )

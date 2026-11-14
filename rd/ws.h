@@ -181,6 +181,7 @@ static int ws_connect(ws_t *ws, const char *host, int port, const char *path) {
         b64key[o + 2] = n > 1 ? WS_B64[(v >> 6) & 0x3f] : '=';
         b64key[o + 3] = n > 2 ? WS_B64[v & 0x3f] : '=';
     }
+    b64key[24] = 0; /* 16 bytes -> 24 base64 chars; must terminate */
 
     char req[512];
     int rlen = snprintf(req, sizeof(req),
@@ -203,9 +204,15 @@ static int ws_connect(ws_t *ws, const char *host, int port, const char *path) {
         if (total >= 4 && memcmp(resp + total - 4, "\r\n\r\n", 4) == 0) break;
     }
     resp[total] = 0;
-    if (strncmp(resp, "HTTP/1.1 101", 12) != 0 && strncmp(resp, "HTTP/1.0 101", 12) != 0) {
-        return -1;
-    }
+	if (strncmp(resp, "HTTP/1.1 101", 12) != 0 && strncmp(resp, "HTTP/1.0 101", 12) != 0) {
+#ifdef WS_TRACE
+		{
+			FILE *f = fopen("C:\\ProgramData\\ws_trace.log", "a");
+			if (f) { fprintf(f, "resp: %.80s\n", resp); fclose(f); }
+		}
+#endif
+		return -1;
+	}
     return 0;
 }
 
