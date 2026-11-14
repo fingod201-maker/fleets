@@ -256,7 +256,8 @@ run_check() {
   curl -fsS --max-time 5 http://127.0.0.1:8000/healthz >/dev/null 2>&1 && ok "panel /healthz" || bad "panel /healthz"
   curl -fsS --max-time 5 http://127.0.0.1:8001/healthz >/dev/null 2>&1 && ok "bridge /healthz" || bad "bridge /healthz"
   port_open 31337 && ok "sliver gRPC 31337" || bad "sliver gRPC 31337"
-  port_open 8443 && ok "rd broker 8443" || bad "rd broker 8443"
+  local rd_port="${PANEL_RD_PORT:-8443}"
+  port_open "$rd_port" && ok "rd broker ${rd_port}" || bad "rd broker ${rd_port}"
   systemctl is-enabled --quiet fleet-panel.service 2>/dev/null && ok "panel unit enabled" || bad "panel unit enabled"
   systemctl is-enabled --quiet caddy.service 2>/dev/null && ok "caddy unit enabled" || bad "caddy unit enabled"
   local free_gb
