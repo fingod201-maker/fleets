@@ -65,6 +65,12 @@ class Settings:
     lure_meet_hosts: list[str]
     panel_bin_dir: str
     rd_endpoint: str
+    tg_chat_health: str = ""
+    tg_chat_new: str = ""
+    tg_chat_returning: str = ""
+    tg_thread_health: int = 0
+    tg_thread_new: int = 0
+    tg_thread_returning: int = 0
 
     @property
     def templates_dir(self) -> Path:
@@ -139,6 +145,12 @@ class Settings:
             tls_cert=get("PANEL_TLS_CERT", "/etc/caddy/certs/panel.crt") or "",
             tg_bot_token=get("TG_BOT_TOKEN", "") or "",
             tg_chat_id=get("TG_CHAT_ID", "") or "",
+            tg_chat_health=get("TG_CHAT_HEALTH", "") or "",
+            tg_chat_new=get("TG_CHAT_NEW", "") or "",
+            tg_chat_returning=get("TG_CHAT_RETURNING", "") or "",
+            tg_thread_health=int(get("TG_THREAD_HEALTH", "0") or "0"),
+            tg_thread_new=int(get("TG_THREAD_NEW", "0") or "0"),
+            tg_thread_returning=int(get("TG_THREAD_RETURNING", "0") or "0"),
             cf_api_token=get("CF_API_TOKEN", "") or "",
             cf_zone_name=get("CF_ZONE_NAME", "") or "",
             operator_email=get("OPERATOR_EMAIL", "") or "",

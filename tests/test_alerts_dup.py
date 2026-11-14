@@ -9,7 +9,7 @@ class FakeTG:
     def __init__(self):
         self.sent = []
 
-    def send(self, html, caption=""):
+    def send(self, html, caption="", **kwargs):
         self.sent.append(html)
 
 

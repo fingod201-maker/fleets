@@ -281,6 +281,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pool = config.lure_meet_hosts if profile == "meet" else config.lure_hosts
         family = landing.sniff(ua) if ua else os
         family = landing.family_for_os(family if family != "all" else os)
+        if family not in ("windows", "macos", "linux", "all"):
+            return JSONResponse({"url": "", "family": family, "profile": profile})
         recent = await run_in_threadpool(app.state.pipeline.recent, 300)
 
         def art_profile(artifact: dict) -> str:

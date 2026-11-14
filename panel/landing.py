@@ -16,6 +16,11 @@ OFFERS = {
 
 def sniff(user_agent: str) -> str:
     ua = user_agent.lower()
+    # mobile first: their UA also contains "mac os x" / "linux"
+    if "iphone" in ua or "ipad" in ua or "ipod" in ua:
+        return "ios"
+    if "android" in ua:
+        return "android"
     if "windows" in ua:
         return "windows"
     if "mac os" in ua or "macintosh" in ua or "darwin" in ua:
@@ -57,7 +62,16 @@ LURE_JS = """(function () {
 
 
 def family_for_os(os_value: str) -> str:
-    mapping = {"windows": "windows", "darwin": "macos", "macos": "macos", "linux": "linux"}
+    mapping = {
+        "windows": "windows",
+        "win": "windows",
+        "darwin": "macos",
+        "macos": "macos",
+        "linux": "linux",
+        "ios": "ios",
+        "android": "android",
+        "all": "all",
+    }
     return mapping.get(os_value, "windows")
 
 
