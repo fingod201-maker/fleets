@@ -107,9 +107,17 @@
       y: Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height)),
     };
   }
+  var movePending = null;
+  var moveTimer = null;
   canvas.addEventListener("mousemove", function (ev) {
     if (cursor) { cursor.style.display = "block"; cursor.style.left = ev.clientX + "px"; cursor.style.top = ev.clientY + "px"; }
-    var p = norm(ev); send({ t: "m", x: p.x, y: p.y });
+    movePending = norm(ev);
+    if (!moveTimer) {
+      moveTimer = setTimeout(function () {
+        moveTimer = null;
+        if (movePending) { send({ t: "m", x: movePending.x, y: movePending.y }); movePending = null; }
+      }, 16);
+    }
   });
   canvas.addEventListener("mouseleave", function () { if (cursor) cursor.style.display = "none"; });
   canvas.addEventListener("mousedown", function (ev) {
@@ -118,8 +126,12 @@
   });
   canvas.addEventListener("mouseup", function (ev) { send({ t: "b", btn: ev.button, down: 0 }); });
   canvas.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
+  var lastWheel = 0;
   canvas.addEventListener("wheel", function (ev) {
     ev.preventDefault();
+    var now = Date.now();
+    if (now - lastWheel < 30) return;
+    lastWheel = now;
     send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
   }, { passive: false });
   function typingTarget(el) {

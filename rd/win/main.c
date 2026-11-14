@@ -82,7 +82,7 @@ static unsigned char *capture_rgb(int *out_w, int *out_h) {
     }
     if (vw <= 0 || vh <= 0) return NULL;
     /* downscale very wide multi-monitor desktops for bandwidth */
-    int w = vw, h = vh, maxw = 1600;
+    int w = vw, h = vh, maxw = 1280;
     if (vw > maxw) {
         w = maxw;
         h = (int)((long long)vh * maxw / vw);
@@ -226,9 +226,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         screen_w = GetSystemMetrics(SM_CXSCREEN);
         screen_h = GetSystemMetrics(SM_CYSCREEN);
     }
-    if (screen_w > 1600) {
-        screen_h = (int)((long long)screen_h * 1600 / screen_w);
-        screen_w = 1600;
+    if (screen_w > 1280) {
+        screen_h = (int)((long long)screen_h * 1280 / screen_w);
+        screen_w = 1280;
         if (screen_h <= 0) screen_h = 1;
     }
 
@@ -249,16 +249,20 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
              screen_h);
     ws_send(&ws, hello, strlen(hello), 1);
 
-    char inbuf[4096];
-    long delay = 125000;
+    char inbuf[8192];
+    long delay = 80000;
+    int closed = 0;
     for (;;) {
-        if (ws_wait(&ws, 0) == 1) {
+        /* drain every pending input message so pointer/keyboard stay responsive */
+        for (int k = 0; k < 128; k++) {
+            if (ws_wait(&ws, 0) != 1) break;
             int op = 0;
             long n = ws_recv(&ws, inbuf, sizeof(inbuf) - 1, &op);
-            if (n <= 0) break;
+            if (n <= 0) { closed = 1; break; }
             inbuf[n] = 0;
             if (op == 1) apply_input(inbuf, 0, 0);
         }
+        if (closed) break;
         int w = 0, h = 0;
         unsigned char *rgb = capture_rgb(&w, &h);
         if (!rgb) {
@@ -281,8 +285,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         free(mb.data);
         if (rc != 0) break;
         DWORD elapsed = GetTickCount() - start;
-        if (elapsed > 125) delay = 500000;
-        else if (elapsed < 60) delay = 125000;
+        if (elapsed > 100) delay = 300000;
+        else if (elapsed < 40) delay = 80000;
         Sleep((DWORD)(delay / 1000));
     }
     ws_close(&ws);

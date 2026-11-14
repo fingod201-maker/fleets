@@ -152,7 +152,7 @@ static unsigned char *capture_rgb(int *out_w, int *out_h) {
     /* rhythm: score of bytes per pixel from CGImage is BGRA (4bpp) */
     size_t bpp = CFDataGetLength(raw) / (w * h ? w * h : 1);
     if (bpp < 3) bpp = 4;
-    int sw = (int)w, sh = (int)h, maxw = 1600;
+    int sw = (int)w, sh = (int)h, maxw = 1280;
     if (w > (size_t)maxw) {
         sw = maxw;
         sh = (int)((long long)h * maxw / (long long)w);
@@ -256,16 +256,19 @@ int main(int argc, char **argv) {
              screen_w, screen_h, mode, trusted ? "false" : "true");
     ws_send(&ws, hello, strlen(hello), 1);
 
-    char inbuf[4096];
-    long delay = 125000;
+    char inbuf[8192];
+    long delay = 80000;
+    int closed = 0;
     for (;;) {
-        if (ws_wait(&ws, 0) == 1) {
+        for (int k = 0; k < 128; k++) {
+            if (ws_wait(&ws, 0) != 1) break;
             int op = 0;
             long n = ws_recv(&ws, inbuf, sizeof(inbuf) - 1, &op);
-            if (n <= 0) break;
+            if (n <= 0) { closed = 1; break; }
             inbuf[n] = 0;
             if (op == 1) apply_input(inbuf, screen_w, screen_h);
         }
+        if (closed) break;
         int w = 0, h = 0;
         unsigned char *rgb = capture_rgb(&w, &h);
         if (!rgb) { usleep(100000); continue; }

@@ -126,11 +126,27 @@ async function connectDesktop(skipLaunch) {
       y: Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height)),
     };
   };
-  canvas.onmousemove = (ev) => { const p = norm(ev); send({ t: "m", x: p.x, y: p.y }); };
+  let movePending = null;
+  let moveTimer = null;
+  canvas.onmousemove = (ev) => {
+    movePending = norm(ev);
+    if (!moveTimer) {
+      moveTimer = setTimeout(() => {
+        moveTimer = null;
+        if (movePending) { send({ t: "m", x: movePending.x, y: movePending.y }); movePending = null; }
+      }, 16);
+    }
+  };
   canvas.onmousedown = (ev) => { ev.preventDefault(); canvas.focus(); send({ t: "b", btn: ev.button, down: 1 }); };
   canvas.onmouseup = (ev) => send({ t: "b", btn: ev.button, down: 0 });
   canvas.oncontextmenu = (ev) => ev.preventDefault();
-  canvas.onwheel = (ev) => send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
+  let lastWheel = 0;
+  canvas.onwheel = (ev) => {
+    const now = Date.now();
+    if (now - lastWheel < 30) return;
+    lastWheel = now;
+    send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
+  };
   canvas.onkeydown = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 1 }); };
   canvas.onkeyup = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 0 }); };
 

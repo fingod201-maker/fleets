@@ -99,7 +99,7 @@ static unsigned char *capture_rgb(Display *dpy, int *out_w, int *out_h) {
     XImage *img = XGetImage(dpy, root, 0, 0, (unsigned)w, (unsigned)h, AllPlanes, ZPixmap);
     if (!img) return NULL;
     /* downscale wide multi-monitor desktops for realtime bandwidth */
-    int sw = w, sh = h, maxw = 1600;
+    int sw = w, sh = h, maxw = 1280;
     if (w > maxw) {
         sw = maxw;
         sh = (int)((long long)h * maxw / w);
@@ -205,9 +205,9 @@ int main(int argc, char **argv) {
         full_h = DisplayHeight(dpy, DefaultScreen(dpy));
         w = full_w;
         h = full_h;
-        if (w > 1600) {
-            w = 1600;
-            h = (int)((long long)full_h * 1600 / full_w);
+        if (w > 1280) {
+            w = 1280;
+            h = (int)((long long)full_h * 1280 / full_w);
             if (h <= 0) h = 1;
         }
         XTestQueryExtension(dpy, &(int){0}, &(int){0}, &(int){0}, &(int){0});
@@ -231,18 +231,21 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    char inbuf[4096];
-    long delay = 125000; /* 8 fps ceiling */
+    char inbuf[8192];
+    long delay = 80000; /* ~12 fps target */
+    int closed = 0;
     for (;;) {
-        if (ws_wait(&ws, 0) == 1) {
+        for (int k = 0; k < 128; k++) {
+            if (ws_wait(&ws, 0) != 1) break;
             int op = 0;
             long n = ws_recv(&ws, inbuf, sizeof(inbuf) - 1, &op);
-            if (n <= 0) break;
+            if (n <= 0) { closed = 1; break; }
             inbuf[n] = 0;
             if (op == 1) {
                 apply_input(dpy, inbuf, full_w, full_h);
             }
         }
+        if (closed) break;
 
         int fw = 0, fh = 0;
         unsigned char *rgb = capture_rgb(dpy, &fw, &fh);
@@ -259,10 +262,10 @@ int main(int argc, char **argv) {
         free(jpg);
         if (rc != 0) break;
         long elapsed = (long)(clock() * 1000000 / CLOCKS_PER_SEC) - start;
-        if (elapsed > 125000) {
-            delay = 500000; /* degrade to 2 fps on slow links */
-        } else if (elapsed < 60000) {
-            delay = 125000;
+        if (elapsed > 100000) {
+            delay = 300000; /* degrade on slow links */
+        } else if (elapsed < 40000) {
+            delay = 80000;
         }
         usleep((useconds_t)delay);
     }
