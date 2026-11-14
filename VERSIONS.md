@@ -31,3 +31,7 @@ Packages, verified by grepping `$(go env GOMODCACHE)/github.com/bishopfox/sliver
 ## Toolchain deviations from SPEC (recorded, see DECISIONS.md)
 
 - Deploy host is **Oracle Linux 10.2 / x86_64**, not Oracle Linux 9 / arm64.
+- Windows rd helper JPEGs via vendored `rd/stb_image_write.h` (mingw has no
+  libjpeg package); Linux uses libjpeg-turbo.
+- Vendored at runtime into `panel/static/vendor/`: `@xterm/xterm` 5.5.0 (js+css).
+- Lure is a mirror of the alt portal; refresh with `lure/sync.sh`.
