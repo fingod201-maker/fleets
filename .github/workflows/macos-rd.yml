@@ -1,0 +1,32 @@
+name: build-rd-mac
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "rd/mac/**"
+      - "rd/ws.h"
+      - "rd/stb_image_write.h"
+      - ".github/workflows/macos-rd.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal rd-mac
+        run: |
+          set -eux
+          clang -O2 -arch x86_64 -arch arm64 -Wno-deprecated-declarations \
+            -o rd-mac rd/mac/main.c \
+            -framework ApplicationServices -framework CoreGraphics -framework Foundation
+          file rd-mac
+          otool -L rd-mac | sed -n '1,10p'
+          codesign --force --sign - rd-mac || true
+          shasum -a 256 rd-mac
+          ls -l rd-mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rd-mac
+          path: rd-mac
+          retention-days: 30
