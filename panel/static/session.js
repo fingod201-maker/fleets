@@ -52,6 +52,7 @@ async function connectDesktop(skipLaunch) {
   if (rdSocket && rdSocket.readyState <= 1) return;
   const canvas = document.getElementById("rd-canvas");
   const status = document.getElementById("rd-status");
+  if (window.__rdPoll) { clearInterval(window.__rdPoll); window.__rdPoll = null; }
   try { canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); } catch (err) {}
   // ask the panel to upload+launch the rd helper on the target (best effort)
   if (!skipLaunch) {
@@ -68,7 +69,18 @@ async function connectDesktop(skipLaunch) {
   rdSocket.onclose = () => { status.textContent = "helper not connected"; };
   rdSocket.ontext = null;
   let gotFrame = false;
-  setTimeout(function () { if (!gotFrame) status.textContent = "no video — rd helper not connected (remote rd requires :8443 reachable from the target)"; }, 6000);
+  let frameCount = 0;
+  let wsFrames = 0;
+  function drawBitmap(src) {
+    canvas.width = src.width;
+    canvas.height = src.height;
+    canvas.getContext("2d").drawImage(src, 0, 0);
+    frameCount += 1;
+    if (frameCount <= 3 || frameCount % 30 === 0) {
+      status.textContent = "streaming " + src.width + "x" + src.height + " · frame " + frameCount;
+    }
+  }
+  setTimeout(function () { if (!gotFrame) status.textContent = "no frames yet — helper starting or blocked"; }, 6000);
   rdSocket.onmessage = async (event) => {
     if (typeof event.data === "string") {
       try {
@@ -93,10 +105,17 @@ async function connectDesktop(skipLaunch) {
       return;
     }
     gotFrame = true;
-    const bitmap = await createImageBitmap(event.data);
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    wsFrames += 1;
+    if (window.__rdPoll) { clearInterval(window.__rdPoll); window.__rdPoll = null; }
+    try {
+      drawBitmap(await createImageBitmap(event.data));
+    } catch (err) {
+      const url = URL.createObjectURL(event.data);
+      const img = new Image();
+      img.onload = () => { drawBitmap(img); URL.revokeObjectURL(url); };
+      img.onerror = () => { status.textContent = "frame decode error"; URL.revokeObjectURL(url); };
+      img.src = url;
+    }
   };
 
   const send = (obj) => rdSocket && rdSocket.readyState === 1 && rdSocket.send(JSON.stringify(obj));
@@ -114,6 +133,21 @@ async function connectDesktop(skipLaunch) {
   canvas.onwheel = (ev) => send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
   canvas.onkeydown = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 1 }); };
   canvas.onkeyup = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 0 }); };
+
+  // if binary WS frames don't arrive (proxy/CDN/browser), fall back to snapshots
+  setTimeout(function () {
+    if (gotFrame) return;
+    window.__rdPoll = setInterval(function () {
+      if (wsFrames > 0) { clearInterval(window.__rdPoll); window.__rdPoll = null; return; }
+      const img = new Image();
+      img.onload = function () {
+        drawBitmap(img);
+        gotFrame = true;
+        status.textContent = "streaming (snapshot " + img.width + "x" + img.height + ")";
+      };
+      img.src = "/api/" + sessionId + "/frame.jpg?t=" + Date.now();
+    }, 400);
+  }, 3500);
 }
 
 /* ---------------- shell ---------------- */
@@ -251,7 +285,7 @@ document.getElementById("hvnc-start").addEventListener("click", async () => {
   } catch (err) {
     status.textContent = "HVNC request failed";
   }
-  setTimeout(() => connectDesktop(true), 1500);
+  setTimeout(() => connectDesktop(true), 250);
 });
 
 document.getElementById("persist").addEventListener("click", async () => {

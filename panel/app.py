@@ -596,6 +596,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail=f"{helper.name} not built on this host (os={os_name or 'unknown'})",
             )
         token = await run_in_threadpool(broker.mint, session_id)
+        broker.forget(session_id)
         if is_win:
             remote = str(body.get("dir") or "C:\\\\ProgramData")
             remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
@@ -753,6 +754,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rows = await run_in_threadpool(database.creds_for, session_id)
         return JSONResponse({"creds": [dict(row) for row in rows]})
 
+    @app.get("/api/{session_id}/frame.jpg")
+    async def api_frame(request: Request, session_id: str):
+        """Latest frame as a plain JPEG (diagnostic + no-JS fallback view)."""
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        frame = broker.last_frame(session_id)
+        if not frame:
+            raise HTTPException(status_code=404, detail="no frame yet")
+        return Response(
+            content=frame,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.post("/api/{session_id}/hvnc")
     async def api_hvnc(request: Request, session_id: str):
         session = require(request)
@@ -772,6 +787,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not hvnc_bin.is_file():
             raise HTTPException(status_code=400, detail="hvnc.exe not built on this host")
         token = await run_in_threadpool(broker.mint, session_id)
+        broker.forget(session_id)
         remote = body.get("dir") or "C:\\\\ProgramData"
         remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
         tag = secrets.token_hex(3)

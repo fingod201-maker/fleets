@@ -51,7 +51,16 @@ class RDBroker:
         self.on_creds = on_creds
         self._helpers: dict[str, object] = {}
         self._browsers: dict[str, set[asyncio.Queue[bytes | str]]] = defaultdict(set)
+        self._last_hello: dict[str, str] = {}
+        self._last_frame: dict[str, bytes] = {}
         self._server: object | None = None
+
+    def forget(self, session_id: str) -> None:
+        """Drop stale hello metadata before launching a new helper."""
+        self._last_hello.pop(session_id, None)
+
+    def last_frame(self, session_id: str) -> bytes | None:
+        return self._last_frame.get(session_id)
 
     def mint(self, session_id: str, ttl: int = 3600) -> str:
         return mint_token(self.config.panel_secret, session_id, ttl)
@@ -108,17 +117,27 @@ class RDBroker:
                 if self._helpers.get(session_id) is not connection:
                     break
                 if isinstance(message, str):
+                    if '"t":"hello"' in message.replace(" ", ""):
+                        self._last_hello[session_id] = message
                     await self._maybe_creds(session_id, message)
+                else:
+                    self._last_frame[session_id] = message
                 await self._fanout(session_id, message)
         finally:
             if self._helpers.get(session_id) is connection:
                 del self._helpers[session_id]
+                self._last_hello.pop(session_id, None)
             self._browsers.pop(session_id, None)
             log.info("rd helper disconnected for %s", session_id)
 
     # -- browser side --------------------------------------------------------
     def subscribe(self, session_id: str) -> asyncio.Queue[bytes | str]:
         queue: asyncio.Queue[bytes | str] = asyncio.Queue(maxsize=8)
+        # replay the helper hello so late subscribers still learn mode/size/caps
+        hello = self._last_hello.get(session_id)
+        if hello:
+            with suppress(asyncio.QueueFull):
+                queue.put_nowait(hello)
         self._browsers[session_id].add(queue)
         return queue
 
