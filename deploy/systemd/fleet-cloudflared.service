@@ -1,0 +1,17 @@
+[Unit]
+Description=fleet cloudflare tunnel
+After=network-online.target fleet-panel.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/panel/env
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel run --token ${CF_TUNNEL_TOKEN}
+Restart=always
+RestartSec=5
+MemoryMax=512M
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

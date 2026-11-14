@@ -1,21 +1,17 @@
+# Host-default cloudflared unit (token-file based). On this shared host another
+# tenant already owns this unit; deploy.sh restores this exact shape and runs the
+# fleet tunnel under fleet-cloudflared.service instead.
 [Unit]
-Description=fleet cloudflare tunnel
-After=network-online.target fleet-panel.service
+Description=cloudflared tunnel
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=opc
-Group=opc
-EnvironmentFile=/etc/panel/env
-ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+User=root
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token
 Restart=always
 RestartSec=5
-WatchdogSec=60
-MemoryMax=512M
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/home/opc/.cloudflared /etc/cloudflared
 
 [Install]
 WantedBy=multi-user.target

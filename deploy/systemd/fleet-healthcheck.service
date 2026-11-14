@@ -1,0 +1,7 @@
+[Unit]
+Description=fleet healthcheck
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/panel/bin/healthcheck.sh

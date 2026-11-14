@@ -37,6 +37,7 @@ def _base_settings():
         cf_zone_name="",
         operator_email="",
         document_name="doc",
+        lure_hosts=["get"],
     )
 
 

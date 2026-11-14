@@ -43,18 +43,37 @@ func (m *Manager) Run(ctx context.Context) {
 			continue
 		}
 		backoff = time.Second
-		tunnelCtx, cancel := context.WithCancel(ctx)
-		go func() {
-			if err := core.TunnelLoop(tunnelCtx, m.currentClient()); err != nil {
-				logf("tunnel loop exited: %v", err)
-			}
-			cancel()
-		}()
-		go m.eventsLoop(tunnelCtx)
-		m.monitor(tunnelCtx)
+		connCtx, cancel := context.WithCancel(ctx)
+		go m.tunnelSupervisor(connCtx)
+		go m.eventsSupervisor(connCtx)
+		m.monitor(connCtx)
 		cancel()
 		m.teardown()
 		sleep(ctx, backoff)
+	}
+}
+
+// tunnelSupervisor keeps the tunnel data stream alive. A stream hiccup must not
+// tear down the whole connection (that would cancel an in-flight Generate).
+func (m *Manager) tunnelSupervisor(ctx context.Context) {
+	for ctx.Err() == nil {
+		client := m.currentClient()
+		if client == nil {
+			return
+		}
+		if err := core.TunnelLoop(ctx, client); err != nil && ctx.Err() == nil {
+			logf("tunnel loop exited: %v (restarting)", err)
+			sleep(ctx, 500*time.Millisecond)
+		}
+	}
+}
+
+func (m *Manager) eventsSupervisor(ctx context.Context) {
+	for ctx.Err() == nil {
+		m.eventsLoop(ctx)
+		if ctx.Err() == nil {
+			sleep(ctx, 500*time.Millisecond)
+		}
 	}
 }
 
@@ -84,10 +103,13 @@ func (m *Manager) connect(ctx context.Context) bool {
 	return true
 }
 
-// monitor blocks until a ping fails or ctx is done.
+// monitor blocks until two consecutive pings fail (or ctx is done). A generous
+// timeout and a second chance keep an in-flight build from being torn down when
+// the teamserver is briefly starved of CPU.
 func (m *Manager) monitor(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -97,12 +119,17 @@ func (m *Manager) monitor(ctx context.Context) {
 			if client == nil {
 				return
 			}
-			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			_, err := client.GetVersion(pingCtx, &commonpb.Empty{})
 			cancel()
 			if err != nil {
+				failures++
 				m.setDown(fmt.Sprintf("ping: %v", err))
-				return
+				if failures >= 2 {
+					return
+				}
+			} else {
+				failures = 0
 			}
 		}
 	}

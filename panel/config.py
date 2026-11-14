@@ -61,6 +61,7 @@ class Settings:
     cf_zone_name: str
     operator_email: str
     document_name: str
+    lure_hosts: list[str]
 
     @property
     def templates_dir(self) -> Path:
@@ -69,6 +70,10 @@ class Settings:
     @property
     def static_dir(self) -> Path:
         return self.base_dir / "static"
+
+    @property
+    def lure_dir(self) -> Path:
+        return self.base_dir / "lure"
 
     @staticmethod
     def load(env_file: str | None = None) -> Settings:
@@ -125,4 +130,11 @@ class Settings:
             cf_zone_name=get("CF_ZONE_NAME", "") or "",
             operator_email=get("OPERATOR_EMAIL", "") or "",
             document_name=get("DOCUMENT_NAME", "Q3 Report") or "Q3 Report",
+            lure_hosts=[
+                h.strip()
+                for h in (
+                    get("PANEL_LURE_HOSTS", "get,us01web,us02web,us03web,us04web,us05web") or ""
+                ).split(",")
+                if h.strip()
+            ],
         )

@@ -129,6 +129,13 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request) {
 		name = fmt.Sprintf("fleet-%s-%s-%d", body.OS, body.Arch, time.Now().Unix())
 	}
 
+	// A previous attempt for the same name may have left a partial vendored
+	// tree behind; clear it so "rename import dir: target exists" cannot hit.
+	if home, err := os.UserHomeDir(); err == nil {
+		srcDir := filepath.Join(home, ".sliver", "slivers", body.OS, body.Arch, name, "src")
+		_ = os.RemoveAll(srcDir)
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 600*time.Second)
 	defer cancel()
 	resp, err := client.Generate(ctx, &clientpb.GenerateReq{
