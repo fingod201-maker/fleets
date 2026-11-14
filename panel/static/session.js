@@ -1,0 +1,171 @@
+"use strict";
+
+const root = document.getElementById("session-root");
+const sessionId = root.dataset.session;
+const rdPort = location.port && location.port !== "443" ? `:${location.port}` : "";
+
+function show(tab) {
+  document.querySelectorAll("section.panel").forEach((el) => el.classList.add("hidden"));
+  document.querySelectorAll("button.tab").forEach((el) => el.classList.remove("active"));
+  document.getElementById(`tab-${tab}`).classList.remove("hidden");
+  document.querySelector(`button.tab[data-tab="${tab}"]`).classList.add("active");
+  if (tab === "shell") startShell();
+  if (tab === "files") listFiles(".");
+  if (tab === "procs") listProcs();
+  if (tab === "info") loadInfo();
+}
+document.querySelectorAll("button.tab").forEach((btn) =>
+  btn.addEventListener("click", () => show(btn.dataset.tab))
+);
+
+/* ---------------- desktop ---------------- */
+let rdSocket = null;
+let term = null;
+
+function wsUrl(path) {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}${path}`;
+}
+
+function connectDesktop() {
+  if (rdSocket && rdSocket.readyState <= 1) return;
+  const canvas = document.getElementById("rd-canvas");
+  const status = document.getElementById("rd-status");
+  status.textContent = "connecting…";
+  rdSocket = new WebSocket(wsUrl(`/rd/${sessionId}`));
+  rdSocket.binaryType = "blob";
+  rdSocket.onopen = () => { status.textContent = "broker connected"; canvas.focus(); };
+  rdSocket.onclose = () => { status.textContent = "helper not connected"; };
+  rdSocket.ontext = null;
+  rdSocket.onmessage = async (event) => {
+    if (typeof event.data === "string") {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.t === "hello") {
+          canvas.width = msg.w || canvas.width;
+          canvas.height = msg.h || canvas.height;
+          status.textContent = msg.view_only ? "view only (no DISPLAY)" : "streaming";
+        }
+      } catch (err) { /* non-fatal */ }
+      return;
+    }
+    const bitmap = await createImageBitmap(event.data);
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+  };
+
+  const send = (obj) => rdSocket && rdSocket.readyState === 1 && rdSocket.send(JSON.stringify(obj));
+  const norm = (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height)),
+    };
+  };
+  canvas.onmousemove = (ev) => { const p = norm(ev); send({ t: "m", x: p.x, y: p.y }); };
+  canvas.onmousedown = (ev) => { ev.preventDefault(); canvas.focus(); send({ t: "b", btn: ev.button, down: 1 }); };
+  canvas.onmouseup = (ev) => send({ t: "b", btn: ev.button, down: 0 });
+  canvas.oncontextmenu = (ev) => ev.preventDefault();
+  canvas.onwheel = (ev) => send({ t: "b", btn: ev.deltaY < 0 ? 4 : 5, down: 1 });
+  canvas.onkeydown = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 1 }); };
+  canvas.onkeyup = (ev) => { ev.preventDefault(); send({ t: "k", code: ev.keyCode, down: 0 }); };
+}
+
+/* ---------------- shell ---------------- */
+function startShell() {
+  if (term || typeof Terminal === "undefined") return;
+  term = new Terminal({ fontSize: 12, theme: { background: "#0d1117", foreground: "#c9d1d9" } });
+  term.open(document.getElementById("term"));
+  const socket = new WebSocket(wsUrl(`/shell/${sessionId}`));
+  socket.binaryType = "arraybuffer";
+  socket.onmessage = (event) => term.write(new Uint8Array(event.data));
+  socket.onclose = () => term.write("\r\n[disconnected]\r\n");
+  term.onData((data) => socket.readyState === 1 && socket.send(data));
+  term.onResize(({ rows, cols }) => socket.readyState === 1 && socket.send(JSON.stringify({ rows, cols })));
+}
+
+/* ---------------- files ---------------- */
+async function listFiles(path) {
+  document.getElementById("files-path").value = path;
+  const resp = await fetch(`/api/${sessionId}/ls`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  const body = document.getElementById("files-body");
+  body.innerHTML = "";
+  if (!resp.ok) { body.innerHTML = `<tr><td colspan="4" class="error">${await resp.text()}</td></tr>`; return; }
+  const data = await resp.json();
+  (data.files || []).sort((a, b) => a.name.localeCompare(b.name)).forEach((file) => {
+    const tr = document.createElement("tr");
+    const link = file.is_dir ? `<a href="#" data-dir="${file.name}">${file.name}/</a>` : file.name;
+    tr.innerHTML = `<td>${link}</td><td>${file.is_dir ? "" : file.size}</td><td>${file.mode}</td>`;
+    const actions = document.createElement("td");
+    if (!file.is_dir) {
+      const dl = document.createElement("a");
+      dl.textContent = "dl";
+      dl.href = `/api/${sessionId}/download?path=${encodeURIComponent(joinPath(path, file.name))}`;
+      actions.appendChild(dl);
+    }
+    tr.appendChild(actions);
+    body.appendChild(tr);
+  });
+  body.querySelectorAll("a[data-dir]").forEach((a) =>
+    a.addEventListener("click", (ev) => { ev.preventDefault(); listFiles(joinPath(path, a.dataset.dir)); })
+  );
+}
+
+function joinPath(base, name) {
+  return base.endsWith("/") ? base + name : `${base}/${name}`;
+}
+
+document.getElementById("files-go").addEventListener("click", () =>
+  listFiles(document.getElementById("files-path").value || ".")
+);
+document.getElementById("files-upload").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("path", document.getElementById("files-path").value || ".");
+  form.append("file", file);
+  await fetch(`/api/${sessionId}/upload`, { method: "POST", body: form });
+  listFiles(document.getElementById("files-path").value || ".");
+});
+
+/* ---------------- procs ---------------- */
+async function listProcs() {
+  const resp = await fetch(`/api/${sessionId}/ps`, { method: "POST" });
+  const body = document.getElementById("procs-body");
+  body.innerHTML = "";
+  if (!resp.ok) return;
+  const data = await resp.json();
+  (data.processes || []).forEach((proc) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${proc.pid}</td><td>${proc.ppid}</td><td>${proc.owner || ""}</td><td>${proc.executable || ""}</td>`;
+    const td = document.createElement("td");
+    const kill = document.createElement("button");
+    kill.textContent = "kill";
+    kill.className = "link";
+    kill.addEventListener("click", async () => {
+      await fetch(`/api/${sessionId}/kill`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pid: proc.pid }),
+      });
+      listProcs();
+    });
+    td.appendChild(kill);
+    tr.appendChild(td);
+    body.appendChild(tr);
+  });
+}
+document.getElementById("procs-refresh").addEventListener("click", listProcs);
+
+/* ---------------- info ---------------- */
+async function loadInfo() {
+  const resp = await fetch(`/api/${sessionId}/info`);
+  const data = await resp.json();
+  document.getElementById("info-body").textContent = JSON.stringify(data, null, 2);
+}
+
+document.getElementById("rd-connect").addEventListener("click", connectDesktop);
+show("desktop");

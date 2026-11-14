@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}fleet — {{ session_id[:8] }}{% endblock %}
+{% block header %}
+<header class="bar">
+  <span class="brand"><a href="/">fleet</a></span>
+  <nav><a href="/">implants</a><a href="/build">build</a><a href="/audit">audit</a></nav>
+  <form method="post" action="/logout" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="link">sign out</button>
+  </form>
+</header>
+{% endblock %}
+{% block body %}
+<main data-session="{{ session_id }}" id="session-root">
+  <h2 class="mono">{{ session_id }}</h2>
+  <div class="tabs">
+    <button class="tab" data-tab="desktop">desktop</button>
+    <button class="tab" data-tab="shell">shell</button>
+    <button class="tab" data-tab="files">files</button>
+    <button class="tab" data-tab="procs">processes</button>
+    <button class="tab" data-tab="info">info</button>
+  </div>
+  <section class="panel" id="tab-desktop">
+    <div class="rd-bar">
+      <button id="rd-connect">connect desktop</button>
+      <span id="rd-status" class="dim">helper not connected</span>
+    </div>
+    <canvas id="rd-canvas" width="1024" height="768" tabindex="0"></canvas>
+  </section>
+  <section class="panel hidden" id="tab-shell"><div id="term"></div></section>
+  <section class="panel hidden" id="tab-files">
+    <div class="rd-bar">
+      <input id="files-path" value=".">
+      <button id="files-go">go</button>
+      <input type="file" id="files-upload">
+    </div>
+    <table class="grid"><thead><tr><th>name</th><th>size</th><th>mode</th><th></th></tr></thead>
+    <tbody id="files-body"></tbody></table>
+  </section>
+  <section class="panel hidden" id="tab-procs">
+    <button id="procs-refresh">refresh</button>
+    <table class="grid"><thead><tr><th>pid</th><th>ppid</th><th>owner</th><th>exe</th><th></th></tr></thead>
+    <tbody id="procs-body"></tbody></table>
+  </section>
+  <section class="panel hidden" id="tab-info"><pre id="info-body" class="mono"></pre></section>
+</main>
+{% endblock %}
+{% block scripts %}
+<link rel="stylesheet" href="/static/vendor/xterm.css">
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/session.js"></script>
+{% endblock %}
