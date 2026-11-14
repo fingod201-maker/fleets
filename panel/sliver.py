@@ -127,8 +127,17 @@ class SliverBridge:
     def ifconfig(self, session_id: str) -> dict[str, Any]:
         return self._json("POST", f"/sliver/session/{session_id}/ifconfig")
 
-    def getsystem(self, session_id: str, path: str, args: list[str]) -> dict[str, Any]:
-        return self._json("GET", f"/sliver/session/{session_id}/getsystem")
+    def getsystem(
+        self, session_id: str, hosting_process: str = "", name: str = ""
+    ) -> dict[str, Any]:
+        params = {}
+        if hosting_process:
+            params["hosting_process"] = hosting_process
+        if name:
+            params["name"] = name
+        return self._json(
+            "GET", f"/sliver/session/{session_id}/getsystem", timeout=120.0, params=params
+        )
 
     def rename(self, session_id: str, name: str) -> dict[str, Any]:
         return self._json("POST", f"/sliver/session/{session_id}/rename", json={"name": name})

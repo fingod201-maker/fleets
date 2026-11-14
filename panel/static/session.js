@@ -217,6 +217,22 @@ document.getElementById("persist").addEventListener("click", async () => {
   }
 });
 
+document.getElementById("getsystem").addEventListener("click", async () => {
+  const status = document.getElementById("rd-status");
+  status.textContent = "escalating to SYSTEM…";
+  try {
+    const resp = await fetch(`/api/${sessionId}/getsystem`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    status.textContent = resp.ok
+      ? "GetSystem spawned — a new SYSTEM session should appear in the table"
+      : ("GetSystem failed: " + (data.detail || resp.status));
+  } catch (err) {
+    status.textContent = "GetSystem request failed";
+  }
+});
+
 document.getElementById("service").addEventListener("click", async () => {
   const status = document.getElementById("rd-status");
   status.textContent = "installing boot service (SYSTEM)…";
