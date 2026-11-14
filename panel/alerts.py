@@ -32,8 +32,16 @@ PANELUP_WINDOW = 300
 HEALTH_INTERVAL = int(os.environ.get("PANEL_HEALTH_INTERVAL", "3600") or "3600")
 
 FP_FIELDS = (
-    "host", "user", "os", "arch", "integrity", "transport",
-    "remote_address", "reconnect_interval", "active_c2", "pid",
+    "host",
+    "user",
+    "os",
+    "arch",
+    "integrity",
+    "transport",
+    "remote_address",
+    "reconnect_interval",
+    "active_c2",
+    "pid",
 )
 
 
@@ -165,8 +173,17 @@ class Alerts:
             )
             data = resp.json()
             if data.get("status") == "success":
-                info = {k: str(data.get(k, "")) for k in
-                        ("country", "countryCode", "regionName", "city", "isp", "org", "as", "timezone")}
+                fields = (
+                    "country",
+                    "countryCode",
+                    "regionName",
+                    "city",
+                    "isp",
+                    "org",
+                    "as",
+                    "timezone",
+                )
+                info = {k: str(data.get(k, "")) for k in fields}
         except Exception as exc:  # best effort
             log.debug("geo lookup failed for %s: %s", ip, exc)
         self._geo_cache[ip] = info
@@ -273,7 +290,7 @@ class Alerts:
             connected = False
         free_gb = 0.0
         with contextlib.suppress(OSError):
-            free_gb = shutil.disk_usage(str(self.config.db_path.parent)).free / (1024 ** 3)
+            free_gb = shutil.disk_usage(str(self.config.db_path.parent)).free / (1024**3)
 
         problems = []
         if not connected:
