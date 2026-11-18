@@ -146,48 +146,54 @@ static void inject_input(const char *msg) {
     if (json_str_is(msg, "\"t\"", "m") && json_num(msg, "\"x\"", &x) && json_num(msg, "\"y\"", &y)) {
         g_mx = (int)(x * g_w);
         g_my = (int)(y * g_h);
-        POINT pt;
-        pt.x = g_mx;
-        pt.y = g_my;
-        HWND target = WindowFromPoint(pt);
-        if (target) {
-            POINT cp = pt;
-            ScreenToClient(target, &cp);
-            PostMessageA(target, WM_MOUSEMOVE, 0, MAKELPARAM(cp.x, cp.y));
-        }
+        INPUT in;
+        memset(&in, 0, sizeof(in));
+        in.type = INPUT_MOUSE;
+        in.mi.dx = (LONG)((double)g_mx * 65535.0 / (double)(g_w ? g_w : 1));
+        in.mi.dy = (LONG)((double)g_my * 65535.0 / (double)(g_h ? g_h : 1));
+        in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+        SendInput(1, &in, sizeof(in));
     } else if (json_str_is(msg, "\"t\"", "txt")) {
         char txt[1024];
         json_str(msg, "\"text\"", txt, sizeof(txt));
         if (txt[0]) {
             wchar_t wbuf[600];
             int n = MultiByteToWideChar(CP_UTF8, 0, txt, -1, wbuf, 600);
-            HWND target = GetForegroundWindow();
-            if (!target) target = GetDesktopWindow();
             for (int i = 0; i < n - 1; i++) {
-                PostMessageW(target, WM_CHAR, (WPARAM)wbuf[i], 1);
+                INPUT in;
+                memset(&in, 0, sizeof(in));
+                in.type = INPUT_KEYBOARD;
+                in.ki.wVk = 0;
+                in.ki.wScan = (WORD)wbuf[i];
+                in.ki.dwFlags = KEYEVENTF_UNICODE;
+                SendInput(1, &in, sizeof(in));
+                in.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+                SendInput(1, &in, sizeof(in));
             }
         }
     } else if (json_str_is(msg, "\"t\"", "b") && json_num(msg, "\"btn\"", &btn)) {
         json_num(msg, "\"down\"", &down);
-        POINT pt;
-        pt.x = g_mx;
-        pt.y = g_my;
-        HWND target = WindowFromPoint(pt);
-        if (target) {
-            UINT m = (btn == 2) ? (down ? WM_RBUTTONDOWN : WM_RBUTTONUP)
-                                : (btn == 1) ? (down ? WM_MBUTTONDOWN : WM_MBUTTONUP)
-                                             : (down ? WM_LBUTTONDOWN : WM_LBUTTONUP);
-            POINT cp = pt;
-            ScreenToClient(target, &cp);
-            PostMessageA(target, m, (WPARAM)(down ? MK_LBUTTON : 0), MAKELPARAM(cp.x, cp.y));
+        int b = (int)btn;
+        INPUT in;
+        memset(&in, 0, sizeof(in));
+        in.type = INPUT_MOUSE;
+        UINT f = 0;
+        if (b == 0) f = down != 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+        else if (b == 1) f = down != 0 ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+        else if (b == 2) f = down != 0 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+        if (f) {
+            in.mi.dwFlags = f;
+            SendInput(1, &in, sizeof(in));
         }
     } else if (json_str_is(msg, "\"t\"", "k") && json_num(msg, "\"code\"", &code)) {
         json_num(msg, "\"down\"", &down);
-        HWND fg = GetForegroundWindow();
-        if (!fg) fg = GetDesktopWindow();
-        UINT m = down != 0 ? WM_KEYDOWN : WM_KEYUP;
-        LPARAM lp = down != 0 ? 0x00000001 : (LPARAM)0xC0000001;
-        PostMessageA(fg, m, (WPARAM)code, lp);
+        INPUT in;
+        memset(&in, 0, sizeof(in));
+        in.type = INPUT_KEYBOARD;
+        in.ki.wVk = (WORD)code;
+        in.ki.wScan = (WORD)MapVirtualKey((UINT)code, MAPVK_VK_TO_VSC);
+        in.ki.dwFlags = KEYEVENTF_SCANCODE | (down == 0 ? KEYEVENTF_KEYUP : 0);
+        SendInput(1, &in, sizeof(in));
     } else if (json_str_is(msg, "\"t\"", "spawn")) {
         char cmd[1024];
         json_str(msg, "\"cmd\"", cmd, sizeof(cmd));

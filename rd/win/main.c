@@ -12,62 +12,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../stb_image_write.h"
 
-static int json_str_is(const char *s, const char *key, const char *value) {
-    const char *p = strstr(s, key);
-    if (!p) return 0;
-    p += strlen(key);
-    while (*p == ' ' || *p == ':' || *p == '\t') p++;
-    if (*p != '"') return 0;
-    p++;
-    size_t n = strlen(value);
-    return strncmp(p, value, n) == 0 && p[n] == '"';
-}
-
-static int json_num(const char *s, const char *key, double *out) {
-    const char *p = strstr(s, key);
-    if (!p) return 0;
-    p += strlen(key);
-    while (*p == ' ' || *p == ':' || *p == '"') p++;
-    *out = strtod(p, NULL);
-    return 1;
-}
-
-static void json_str(const char *s, const char *key, char *out, size_t cap) {
-    out[0] = 0;
-    const char *p = strstr(s, key);
-    if (!p) return;
-    p += strlen(key);
-    while (*p == ' ' || *p == ':' || *p == '\t') p++;
-    if (*p != '"') return;
-    p++;
-    size_t o = 0;
-    while (*p && *p != '"' && o + 1 < cap) {
-        if (*p == '\\' && p[1]) {
-            p++;
-            if (*p == 'n') { out[o++] = '\n'; p++; continue; }
-            if (*p == 't') { out[o++] = '\t'; p++; continue; }
-        }
-        out[o++] = *p++;
-    }
-    out[o] = 0;
-}
-
-static void type_text(const char *txt) {
-    if (!txt || !txt[0]) return;
-    wchar_t wbuf[600];
-    int n = MultiByteToWideChar(CP_UTF8, 0, txt, -1, wbuf, 600);
-    for (int i = 0; i < n - 1; i++) {
-        INPUT in;
-        memset(&in, 0, sizeof(in));
-        in.type = INPUT_KEYBOARD;
-        in.ki.wVk = 0;
-        in.ki.wScan = (WORD)wbuf[i];
-        in.ki.dwFlags = KEYEVENTF_UNICODE;
-        SendInput(1, &in, sizeof(in));
-        in.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-        SendInput(1, &in, sizeof(in));
-    }
-}
+extern void inp_apply(const char *msg, int w, int h);
 
 static unsigned char *capture_rgb(int *out_w, int *out_h) {
     /* whole virtual desktop: covers every monitor, including negative origins */
@@ -149,53 +94,6 @@ static void jpg_write(void *ctx, void *data, int size) {
     buf->len += (size_t)size;
 }
 
-static void mouse_input(DWORD flags, LONG data) {
-    INPUT in;
-    memset(&in, 0, sizeof(in));
-    in.type = INPUT_MOUSE;
-    in.mi.dwFlags = flags;
-    in.mi.mouseData = (DWORD)data;
-    SendInput(1, &in, sizeof(INPUT));
-}
-
-static void apply_input(const char *msg, int w, int h) {
-    double x, y, btn, code, down;
-    if (json_str_is(msg, "\"t\"", "m") && json_num(msg, "\"x\"", &x) && json_num(msg, "\"y\"", &y)) {
-        INPUT in;
-        memset(&in, 0, sizeof(in));
-        in.type = INPUT_MOUSE;
-        in.mi.dx = (LONG)(x * 65535.0);
-        in.mi.dy = (LONG)(y * 65535.0);
-        in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK;
-        SendInput(1, &in, sizeof(INPUT));
-    } else if (json_str_is(msg, "\"t\"", "b") && json_num(msg, "\"btn\"", &btn)) {
-        json_num(msg, "\"down\"", &down);
-        int b = (int)btn;
-        if (b == 4) { mouse_input(MOUSEEVENTF_WHEEL, 120); return; }
-        if (b == 5) { mouse_input(MOUSEEVENTF_WHEEL, -120); return; }
-        DWORD f = 0;
-        if (b == 0) f = down != 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
-        else if (b == 1) f = down != 0 ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-        else if (b == 2) f = down != 0 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
-        if (f) mouse_input(f, 0);
-    } else if (json_str_is(msg, "\"t\"", "k") && json_num(msg, "\"code\"", &code)) {
-        json_num(msg, "\"down\"", &down);
-        INPUT in;
-        memset(&in, 0, sizeof(in));
-        in.type = INPUT_KEYBOARD;
-        in.ki.wVk = (WORD)code;
-        in.ki.wScan = (WORD)MapVirtualKey((UINT)code, MAPVK_VK_TO_VSC);
-        in.ki.dwFlags = KEYEVENTF_SCANCODE | (down == 0 ? KEYEVENTF_KEYUP : 0);
-        SendInput(1, &in, sizeof(INPUT));
-    } else if (json_str_is(msg, "\"t\"", "txt")) {
-        char txt[1200];
-        json_str(msg, "\"text\"", txt, sizeof(txt));
-        type_text(txt);
-    }
-    (void)w;
-    (void)h;
-}
-
 static ws_t g_ws;
 static volatile LONG g_stop = 0;
 
@@ -208,7 +106,7 @@ static DWORD WINAPI input_loop(LPVOID arg) {
             long n = ws_recv(&g_ws, buf, sizeof(buf) - 1, &op);
             if (n <= 0) { g_stop = 1; break; }
             buf[n] = 0;
-            if (op == 1) apply_input(buf, 0, 0);
+            if (op == 1) inp_apply(buf, 0, 0);
         }
     }
     return 0;
