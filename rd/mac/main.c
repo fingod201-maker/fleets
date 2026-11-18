@@ -72,21 +72,69 @@ static void json_str(const char *s, const char *key, char *out, size_t cap) {
     out[o] = 0;
 }
 
+/* Accessibility: prompt the user once so synthetic input is allowed. */
+static int trusted_with_prompt(void) {
+    CFStringRef key = CFSTR(kAXTrustedCheckOptionPromptTemporary);
+    CFBooleanRef yes = kCFBooleanTrue;
+    const void *keys[] = { key };
+    const void *vals[] = { yes };
+    CFDictionaryRef opts = CFDictionaryCreate(NULL, keys, vals, 1,
+                                              &kCFDictionaryKeyCallBacks,
+                                              &kCFDictionaryValueCallBacks);
+    if (!opts) return AXIsProcessTrusted();
+    Boolean r = AXIsProcessTrustedWithOptions(opts);
+    CFRelease(opts);
+    return (int)r;
+}
+
+/* HID event source with suppression interval 0 so synthetic events are not
+ * swallowed by the target. Reused for every keyboard/mouse event. */
+static CGEventSourceRef g_event_source = NULL;
+static CGEventFlags g_modifiers = 0;
+
+static void ensure_event_source(void) {
+    if (!g_event_source) {
+        g_event_source = CGEventSourceCreate(kCGEventSourceCombinedEventState);
+        if (g_event_source) {
+            CGEventSourceSetSuppressionInterval(g_event_source, 0.0);
+            CGEventSourceSetSuppressionState(g_event_source, false);
+        }
+    }
+}
+
+static void set_modifier(CGKeyCode key, int down) {
+    if (key == kCGKeyShiftKeyL || key == kCGKeyShiftKeyR)
+        g_modifiers = down ? (g_modifiers | kCGEventShiftKey) : (g_modifiers & ~kCGEventShiftKey);
+    else if (key == kCGKeyControlL || key == kCGKeyControlR)
+        g_modifiers = down ? (g_modifiers | kCGEventControlKey) : (g_modifiers & ~kCGEventControlKey);
+    else if (key == kCGKeyOptionL || key == kCGKeyOptionR)
+        g_modifiers = down ? (g_modifiers | kCGEventAlternateKey) : (g_modifiers & ~kCGEventAlternateKey);
+    else if (key == kCGKeyCommand || key == kCGKeyCommand /* right cmd has no distinct code */ )
+        g_modifiers = down ? (g_modifiers | kCGEventCommandKey) : (g_modifiers & ~kCGEventCommandKey);
+}
+
+static void apply_flags(CGEventRef ev) {
+    if (ev && g_modifiers) CGEventSetFlags(ev, g_modifiers);
+}
+
 static void type_text(const char *txt) {
     const unsigned char *p = (const unsigned char *)txt;
+    ensure_event_source();
     while (p && *p) {
         UniChar u;
         if (*p < 0x80) { u = *p++; }
         else if ((*p & 0xE0) == 0xC0 && p[1]) { u = (UniChar)(((p[0] & 0x1F) << 6) | (p[1] & 0x3F)); p += 2; }
         else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) { u = (UniChar)(((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F)); p += 3; }
         else { p++; continue; }
-        CGEventRef ev = CGEventCreateKeyboardEvent(NULL, 0, true);
+        CGEventRef ev = CGEventCreateKeyboardEvent(g_event_source, 0, true);
         if (!ev) continue;
+        apply_flags(ev);
         CGEventKeyboardSetUnicodeString(ev, 1, &u);
         CGEventPost(kCGHIDEventTap, ev);
         CFRelease(ev);
-        CGEventRef up = CGEventCreateKeyboardEvent(NULL, 0, false);
+        CGEventRef up = CGEventCreateKeyboardEvent(g_event_source, 0, false);
         if (up) {
+            apply_flags(up);
             CGEventKeyboardSetUnicodeString(up, 1, &u);
             CGEventPost(kCGHIDEventTap, up);
             CFRelease(up);
@@ -180,8 +228,10 @@ static unsigned char *capture_rgb(int *out_w, int *out_h) {
 }
 
 static void post_mouse(CGEventType type, int x, int y, CGMouseButton button) {
-    CGEventRef ev = CGEventCreateMouseEvent(NULL, type, CGPointMake(x, y), button);
+    ensure_event_source();
+    CGEventRef ev = CGEventCreateMouseEvent(g_event_source, type, CGPointMake(x, y), button);
     if (ev) {
+        apply_flags(ev);
         CGEventPost(kCGHIDEventTap, ev);
         CFRelease(ev);
     }
@@ -206,8 +256,15 @@ static void apply_input(const char *msg, int w, int h) {
         post_mouse(type, (int)pt.x, (int)pt.y, button);
     } else if (json_str_is(msg, "\"t\"", "k") && json_num(msg, "\"code\"", &code)) {
         json_num(msg, "\"down\"", &down);
-        CGEventRef ev = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)code, down != 0);
-        if (ev) { CGEventPost(kCGHIDEventTap, ev); CFRelease(ev); }
+        ensure_event_source();
+        CGKeyCode key = (CGKeyCode)code;
+        set_modifier(key, down != 0);
+        CGEventRef ev = CGEventCreateKeyboardEvent(g_event_source, key, down != 0);
+        if (ev) {
+            apply_flags(ev);
+            CGEventPost(kCGHIDEventTap, ev);
+            CFRelease(ev);
+        }
     } else if (json_str_is(msg, "\"t\"", "txt")) {
         char txt[1024];
         json_str(msg, "\"text\"", txt, sizeof(txt));
@@ -238,7 +295,7 @@ int main(int argc, char **argv) {
     int screen_w = 0, screen_h = 0;
     unsigned char *probe = capture_rgb(&screen_w, &screen_h);
     free(probe);
-    int trusted = AXIsProcessTrusted();
+    int trusted = trusted_with_prompt();
 
     char path[512];
     snprintf(path, sizeof(path), "/rd/%s?token=%s", session, token);

@@ -55,23 +55,78 @@ static void json_str(const char *s, const char *key, char *out, size_t cap) {
     out[o] = 0;
 }
 
-static void type_text(Display *dpy, const char *txt) {
+static void flush_ascii_run(Display *dpy, char *buf, int *n) {
+    if (*n <= 0) return;
     KeyCode shift = XKeysymToKeycode(dpy, XK_Shift_L);
-    for (const unsigned char *p = (const unsigned char *)txt; p && *p; p++) {
+    for (int i = 0; i < *n; i++) {
+        char c = buf[i];
         KeySym ks;
-        if (*p == ' ') ks = XK_space;
-        else if (*p == '\n') ks = XK_Return;
-        else { char s[2] = {(char)*p, 0}; ks = XStringToKeysym(s); }
+        if (c == ' ') ks = XK_space;
+        else if (c == '\n') ks = XK_Return;
+        else { char s[2] = { c, 0 }; ks = XStringToKeysym(s); }
         if (ks == NoSymbol) continue;
         KeyCode kc = XKeysymToKeycode(dpy, ks);
         if (!kc) continue;
-        int need_shift = (*p >= 'A' && *p <= 'Z');
+        int need_shift = (c >= 'A' && c <= 'Z');
         if (need_shift) XTestFakeKeyEvent(dpy, shift, True, 0);
         XTestFakeKeyEvent(dpy, kc, True, 0);
         XTestFakeKeyEvent(dpy, kc, False, 0);
         if (need_shift) XTestFakeKeyEvent(dpy, shift, False, 0);
     }
+    *n = 0;
     XFlush(dpy);
+}
+
+static void paste_utf8(Display *dpy, const char *seq) {
+    XStoreBytes(dpy, seq, (int)strlen(seq));
+    XSetSelectionOwner(dpy, XA_PRIMARY, DefaultRootWindow(dpy), CurrentTime);
+    KeyCode ctrl = XKeysymToKeycode(dpy, XK_Control_L);
+    KeyCode v = XKeysymToKeycode(dpy, XK_v);
+    if (ctrl && v) {
+        XTestFakeKeyEvent(dpy, ctrl, True, 0);
+        XTestFakeKeyEvent(dpy, v, True, 0);
+        XTestFakeKeyEvent(dpy, v, False, 0);
+        XTestFakeKeyEvent(dpy, ctrl, False, 0);
+    }
+    XFlush(dpy);
+}
+
+static void type_text(Display *dpy, const char *txt) {
+    /* ASCII and common keys go straight through XTEST; anything that cannot be
+     * mapped to a keysym (non-ASCII UTF-8, dead-key results) is pasted via the
+     * clipboard with Ctrl+V so IME composition is preserved. */
+    char ascii_run[16];
+    int ascii_n = 0;
+    for (const unsigned char *p = (const unsigned char *)txt; p && *p; p++) {
+        if (*p < 0x80) {
+            ascii_run[ascii_n++] = (char)*p;
+            if (ascii_n >= (int)sizeof(ascii_run)) {
+                flush_ascii_run(dpy, ascii_run, &ascii_n);
+            }
+            continue;
+        }
+        flush_ascii_run(dpy, ascii_run, &ascii_n);
+        /* collect the full UTF-8 sequence starting at p */
+        int first = *p;
+        int len = 0;
+        if ((first & 0xF8) == 0xF0) len = 4;
+        else if ((first & 0xF0) == 0xE0) len = 3;
+        else if ((first & 0xE0) == 0xC0) len = 2;
+        else len = 1;
+        char seq[8];
+        memcpy(seq, p, (size_t)len);
+        seq[len] = 0;
+        p += (unsigned long)(len - 1);
+        paste_utf8(dpy, seq);
+    }
+    flush_ascii_run(dpy, ascii_run, &ascii_n);
+}
+
+static int keycode_for(Display *dpy, double code) {
+    if (code < 256) return (unsigned int)code;            /* raw keycode/scancode */
+    KeySym ks = (KeySym)(unsigned long)code;
+    KeyCode kc = XKeysymToKeycode(dpy, ks);
+    return kc ? kc : (unsigned int)code;
 }
 
 static int shift_of(unsigned long mask) {
@@ -161,7 +216,7 @@ static void apply_input(Display *dpy, const char *msg, int w, int h) {
         XTestFakeButtonEvent(dpy, (unsigned)btn, down != 0, 0);
     } else if (json_str_is(msg, "\"t\"", "k") && json_num(msg, "\"code\"", &code)) {
         json_num(msg, "\"down\"", &down);
-        XTestFakeKeyEvent(dpy, (unsigned)code, down != 0, 0);
+        XTestFakeKeyEvent(dpy, (unsigned)keycode_for(dpy, code), down != 0, 0);
     } else if (json_str_is(msg, "\"t\"", "txt")) {
         char txt[1024];
         json_str(msg, "\"text\"", txt, sizeof(txt));
