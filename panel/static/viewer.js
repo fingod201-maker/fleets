@@ -12,6 +12,18 @@
   var gotFrame = false;
   var pollTimer = null;
   var kbOn = true;
+  var oskOn = false;
+  var oskEl = null;
+  var monitors = [{ left: 0, top: 0, width: 0, height: 0, label: "primary" }];
+  var monSel = null;
+  var monIdx = 0;
+
+  function monitorRect() { return monitors[monIdx] || monitors[0]; }
+  function rebase(x, y) {
+    var r = monitorRect();
+    var W = r.width || 1, H = r.height || 1;
+    return { x: r.left + x * W, y: r.top + y * H };
+  }
 
   function wsUrl(path) {
     var proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -66,6 +78,14 @@
             if (msg.w && msg.h) { canvas.width = msg.w; canvas.height = msg.h; }
             if (msg.view_only) setStatus("view only (no display)");
             else setStatus("streaming (" + (msg.mode || mode) + ")");
+            if (msg.needs_accessibility) setStatus("Accessibility not granted — input disabled until allowed in System Settings");
+            if (Array.isArray(msg.monitors) && msg.monitors.length) {
+              monitors = msg.monitors.map(function (m, i) {
+                return { left: m.left || 0, top: m.top || 0, width: m.width || 1, height: m.height || 1,
+                         label: m.label || ("monitor " + (i + 1)) };
+              });
+              if (monSel) refreshMonitors();
+            }
           }
         } catch (err) { /* ignore */ }
         return;
@@ -102,9 +122,12 @@
 
   function norm(ev) {
     var rect = canvas.getBoundingClientRect();
+    var nx = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    var ny = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
+    var r = monitorRect();
     return {
-      x: Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height)),
+      x: r.left + nx * r.width,
+      y: r.top + ny * r.height,
     };
   }
   var movePending = null;
@@ -185,6 +208,91 @@
     if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
     else if (canvas.requestFullscreen) canvas.requestFullscreen().catch(function () {});
   });
+
+  function refreshMonitors() {
+    if (!monSel) return;
+    monSel.innerHTML = "";
+    monitors.forEach(function (m, i) {
+      var o = document.createElement("option");
+      o.value = i;
+      o.textContent = m.label + " (" + m.width + "x" + m.height + ")";
+      if (i === monIdx) o.selected = true;
+      monSel.appendChild(o);
+    });
+  }
+  function initUI() {
+    var bar = document.querySelector(".vbar");
+    if (!bar) return;
+    monSel = document.createElement("select");
+    monSel.id = "v-mon";
+    monSel.title = "Monitor";
+    refreshMonitors();
+    monSel.addEventListener("change", function () {
+      monIdx = parseInt(monSel.value, 10) || 0;
+    });
+    bar.appendChild(document.createTextNode(" "));
+    bar.appendChild(monSel);
+    var osk = document.createElement("button");
+    osk.id = "v-osk";
+    osk.textContent = "OSK";
+    osk.title = "On-screen keyboard";
+    bar.appendChild(document.createTextNode(" "));
+    bar.appendChild(osk);
+    var panel = document.createElement("div");
+    panel.id = "v-osk-panel";
+    panel.style.display = "none";
+    panel.style.position = "fixed";
+    panel.style.bottom = "10px";
+    panel.style.left = "10px";
+    panel.style.background = "#171d27";
+    panel.style.border = "1px solid #2a3342";
+    panel.style.borderRadius = "7px";
+    panel.style.padding = "6px";
+    panel.style.gap = "4px";
+    panel.style.display = "grid";
+    panel.style.gridAutoFlow = "column";
+    panel.style.zIndex = "1000";
+    var rows = [
+      ["`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "bksp"],
+      ["tab", "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "[", "]", "\\"],
+      ["caps", "a", "s", "d", "f", "g", "h", "j", "k", "l", ";", "'", "enter"],
+      ["shift", "z", "x", "c", "v", "b", "n", "m", ",", ".", "/", "shift"],
+      ["ctrl", "alt", "space", "alt", "ctrl"]
+    ];
+    function keycap(label) {
+      var b = document.createElement("button");
+      b.textContent = label;
+      b.style.padding = "4px 8px";
+      b.style.background = "#1d2532";
+      b.style.color = "#dfe5f0";
+      b.style.border = "1px solid #2a3342";
+      b.style.borderRadius = "5px";
+      b.style.cursor = "pointer";
+      b.addEventListener("click", function () { window.oskKey(label); });
+      return b;
+    }
+    rows.forEach(function (row) {
+      row.forEach(function (label) { panel.appendChild(keycap(label)); });
+      var br = document.createElement("div");
+      br.style.gridColumn = "1 / -1";
+      br.style.height = "4px";
+      panel.appendChild(br);
+    });
+    document.body.appendChild(panel);
+    oskEl = panel;
+    osk.addEventListener("click", function () {
+      oskOn = !oskOn;
+      oskEl.style.display = oskOn ? "grid" : "none";
+      osk.classList.toggle("on", oskOn);
+    });
+    var codes = { enter: 13, bksp: 8, tab: 9, space: 32, ctrl: 17, alt: 18, shift: 16, caps: 20 };
+    window.oskKey = function (label) {
+      var c = codes[label];
+      if (c !== undefined) { send({ t: "k", code: c, down: 1 }); send({ t: "k", code: c, down: 0 }); }
+      else { send({ t: "txt", text: label === "space" ? " " : label }); }
+    };
+  }
+  initUI();
 
   launch();
 })();
