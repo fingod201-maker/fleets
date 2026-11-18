@@ -123,22 +123,33 @@ systemd user unit + `loginctl enable-linger`. Linux tarballs and macOS zips
 ship the exec bit set (verified `0755`), so no `chmod +x` is needed; the macOS
 launcher strips `com.apple.quarantine` from its own bundle.
 
-D23.1. **macOS Gatekeeper first-launch.** `[HIGH]`
+D23.1. **macOS Gatekeeper first-launch + non-root elevation.** `[HIGH]`
 Ad-hoc code signing (`codesign -s -`) does NOT satisfy Gatekeeper for
 quarantined browser downloads: double-clicking a freshly-downloaded `.app` shows
 a blocking "can't verify / move to trash / done" dialog and nothing executes
 unless the user first right-clicks -> Open (one-time approval) OR the app is
 whitelisted in the system policy. There is no silent first-launch on macOS
 without an Apple Developer ID + notarized build (not available).
-Mitigation applied:
-- `build_app.sh` launcher attempts `spctl --add <bundle>` + `xattr -dr
-  quarantine` (root-only whitelist; fails gracefully without root) and signs
-  the launcher script too.
-- `install-daemon.sh` (runs as root) runs `spctl --add <dest>` + `xattr -dr
-  quarantine`, so a root-installed LaunchDaemon payload launches silently with
-  no user dialog.
-After one approval (user right-click->Open, or root spctl --add), subsequent
-macOS launches are silent.
+
+Mitigation applied (two-tier):
+1. **First launch (non-root):** user right-clicks -> Open once (Gatekeeper).
+   The launcher strips quarantine, tries `spctl --add` (fails gracefully
+   without root), then shows a native macOS admin-auth dialog via
+   `osascript ... with administrator privileges` to elevate to root. If the
+   user grants credentials, `install-daemon.sh` runs fully as root:
+   `spctl --add` whitelist + `/Library/LaunchDaemons` LaunchDaemon +
+   `pmset` stay-awake. All subsequent launches are completely silent with no
+   dialog. If the user declines or is not an admin, falls back to a per-user
+   `LaunchAgent` in `~/Library/LaunchAgents/` (`RunAtLoad`+`KeepAlive`);
+   silent after the first Gatekeeper approval, survives user reboot/re-login.
+2. **Root install path:** `install-daemon.sh` run as root installs to
+   `/usr/local/lib/.<vendor>/`, runs `spctl --add` + `xattr -dr quarantine`,
+   ad-hoc re-signs, timestamp-matches to `/usr/bin/true`, creates the
+   LaunchDaemon root:wheel 644, and configures stay-awake.
+
+D23.1 is recorded here because it is a hard macOS security boundary, not a
+code bug: silent root elevation without any user interaction is not possible
+through legitimate APIs on modern macOS.
 
 D24. **`deploy.sh --password` rotates and prints the panel password.** `[HIGH]`
 Hashes the exact string (no trailing newline), updates `/etc/panel/env`, restarts
