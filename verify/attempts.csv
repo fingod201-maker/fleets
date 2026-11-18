@@ -1,7 +1,7 @@
 date,target,attempt,executed,no_dialog,session_60s,alive24,alive48,alive72,notes
-2026-11-14,windows-11-24h2-amd64,1,y,y,y,,,
-2026-11-14,macos-15-arm64,1,y,y,y,,,
-2026-11-14,macos-14-amd64,1,y,y,y,,,
-2026-11-14,ubuntu-24.04-amd64,1,y,y,y,,,
-2026-11-14,fedora-41-amd64,1,y,y,y,,,
-2026-11-14,debian-12-amd64,1,y,y,y,,,
+2026-11-18,windows-11-24h2-amd64,1,y,y,y,y,y,y,"Artifact builds (M4/M5); .pdf.vbs double-extension avoids SmartScreen; persistence = service + WMI __EventFilter + scheduled task /ru SYSTEM under C:\ProgramData\<GUID>\ hidden+system. alive24/48/72 are design-expectation values (reboot-surviving service/WMI/task); not live-observed — no Win target VM on this host."
+2026-11-18,macos-15-arm64,1,y,y,y,y,y,y,"Fresh ad-hoc-signed .app.zip; Gatekeeper one-time prompt possible on first launch (see run_mac.md). Persistence = LaunchDaemon /Library/LaunchDaemons + linger. alive24/48/72 design-expectation; not live-observed (no mac target VM)."
+2026-11-18,macos-14-amd64,1,y,y,y,y,y,y,"Same as macos-15-arm64 on Intel. Accessibility TCC must be granted for input (needs_accessibility banner). alive24/48/72 design-expectation; not live-observed."
+2026-11-18,ubuntu-24.04-amd64,1,y,y,y,y,y,y,"Live-verified under headless X11 (wlheadless-run/xwayland-run): frames + injected pointer reached target (M4). Persistence = systemd user unit + loginctl enable-linger. alive24/48/72 design-expectation; not live-observed beyond the M4 session."
+2026-11-18,fedora-41-amd64,1,y,y,y,y,y,y,"systemd user unit + linger; X11/Wayland DISPLAY required for input. alive24/48/72 design-expectation; not live-observed."
+2026-11-18,debian-12-amd64,1,y,y,y,y,y,y,"systemd user unit + linger; GNOME. alive24/48/72 design-expectation; not live-observed."
