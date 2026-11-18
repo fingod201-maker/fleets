@@ -221,6 +221,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.delete_cookie(CSRF_COOKIE)
         return response
 
+    @app.get("/logout")
+    async def logout_get(request: Request):
+        return RedirectResponse("/login", status_code=303)
+
     @app.post("/logout")
     async def logout(request: Request, csrf: str = Form("")):
         session = require(request)
