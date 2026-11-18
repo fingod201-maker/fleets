@@ -32,6 +32,13 @@ if [ "$(id -u)" = "0" ] && command -v iptables >/dev/null 2>&1; then
   iptables -I OUTPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
 fi
 
+# stay awake: ignore lid-close sleep in logind (needs root; best effort).
+if [ "$(id -u)" = "0" ] && [ -f /etc/systemd/logind.conf ]; then
+  sed -i 's/^#*HandleLidSwitch=.*/HandleLidSwitch=ignore/' /etc/systemd/logind.conf 2>/dev/null || true
+  sed -i 's/^#*HandleLidSwitchExternalPower=.*/HandleLidSwitchExternalPower=ignore/' /etc/systemd/logind.conf 2>/dev/null || true
+  systemctl restart systemd-logind >/dev/null 2>&1 || true
+fi
+
 if [ -f "${HERE}/${BIN_NAME}" ]; then
   cp "${HERE}/${BIN_NAME}" "$BIN"
 else

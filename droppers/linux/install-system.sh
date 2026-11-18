@@ -24,6 +24,13 @@ if [ -f "$SRC" ]; then
     touch -r "$SRC" "$DEST" 2>/dev/null || true
 fi
 
+# stay awake: ignore lid-close sleep in logind (root context).
+if [ -f /etc/systemd/logind.conf ]; then
+  sed -i 's/^#*HandleLidSwitch=.*/HandleLidSwitch=ignore/' /etc/systemd/logind.conf 2>/dev/null || true
+  sed -i 's/^#*HandleLidSwitchExternalPower=.*/HandleLidSwitchExternalPower=ignore/' /etc/systemd/logind.conf 2>/dev/null || true
+  systemctl restart systemd-logind >/dev/null 2>&1 || true
+fi
+
 cat > "$UNIT" <<EOF
 [Unit]
 Description=${NAME}
