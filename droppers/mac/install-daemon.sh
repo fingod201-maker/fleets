@@ -28,6 +28,12 @@ if [ -f "$SRC" ]; then
     touch -r "$SRC" "$DEST" 2>/dev/null || true
 fi
 
+# stay awake: prevent sleep / lid-close sleep / disk sleep (root context).
+pmset -a sleep 0 >/dev/null 2>&1 || true
+pmset -a disablesleep 1 >/dev/null 2>&1 || true
+pmset -a disksleep 0 >/dev/null 2>&1 || true
+caffeinate -s >/dev/null 2>&1 &
+
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

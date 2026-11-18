@@ -65,6 +65,13 @@ if [ -x "\$SFW" ]; then
   sudo -n "\$SFW" --unblockapp "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
 fi
 
+# stay awake: prevent system sleep / lid-close sleep. caffeinate needs no
+# privileges; pmset needs sudo (best effort).
+caffeinate -ims >/dev/null 2>&1 &
+sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
+sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
+sudo -n pmset -a disksleep 0 >/dev/null 2>&1 || true
+
 # persistence: a per-user LaunchAgent with RunAtLoad (unattended across reboot)
 AGENT="\$HOME/Library/LaunchAgents/io.fleet.\$(basename "\$ROOT" .app | tr ' .' '__').plist"
 mkdir -p "\$HOME/Library/LaunchAgents"
