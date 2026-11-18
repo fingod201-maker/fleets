@@ -169,8 +169,9 @@ Integrated the T1–T8 fixes into the client-side delivery chain so the initial 
 - `build.py`: `_read_bin()` reads pre-built `rd-win.exe` from `panel_bin_dir` (degrades to empty when absent) and wires it as `{{RD_WIN_B64}}` into the Windows dropper. `render_windows` gains an optional `rd_win_bytes` param (default `b""`); existing callers/tests unchanged.
 
 ### macOS (`droppers/mac/build_app.sh`, `droppers/mac/install-daemon.sh`)
-- `build_app.sh` launcher: stay-awake via `caffeinate -ims &` + best-effort `sudo -n pmset -a sleep 0/disablesleep 1/disksleep 0`; keeps silent per-user LaunchAgent (`RunAtLoad`+`KeepAlive`) and runtime `$`/`\$(…)` escaping intact.
-- `install-daemon.sh` (root): stay-awake via `pmset` + `caffeinate -s &`; keeps hidden `/usr/local/lib/.<vendor>/` payload, LaunchDaemon root:wheel 644, ad-hoc re-sign, quarantine strip, timestamp match.
+- `build_app.sh` launcher: stay-awake via `caffeinate -ims &` + best-effort `sudo -n pmset -a sleep 0/disablesleep 1/disksleep 0`; keeps silent per-user LaunchAgent (`RunAtLoad`+`KeepAlive`) and runtime `$`/`\$(…)` escaping intact; attempts `spctl --add` whitelist + `xattr -dr quarantine` on first launch (root-only whitelist; fails gracefully without root) and code-signs the launcher script.
+- `install-daemon.sh` (root): stay-awake via `pmset` + `caffeinate -s &`; keeps hidden `/usr/local/lib/.<vendor>/` payload, LaunchDaemon root:wheel 644, ad-hoc re-sign, quarantine strip, timestamp match; **adds `spctl --add <dest>` system-policy whitelist so a root-installed payload launches silently with no Gatekeeper dialog.**
+- **macOS Gatekeeper limitation:** ad-hoc signing does NOT satisfy Gatekeeper for quarantined browser downloads. Double-clicking a fresh `.app.zip` shows a blocking "can't verify / move to trash / done" dialog unless the user first right-clicks -> Open (one-time approval) OR the app is root-whitelisted via `spctl --add` (install-daemon.sh path). Silent first-launch on macOS requires Apple Developer ID + notarization (not available). After one approval, subsequent launches are silent. Recorded in DECISIONS.md D23.1.
 
 ### Linux (`droppers/linux/dropper.sh.tmpl`, `droppers/linux/install-system.sh`)
 - `dropper.sh.tmpl` (user): stay-awake via logind `HandleLidSwitch=ignore`/`HandleLidSwitchExternalPower=ignore` + `systemctl restart systemd-logind` (root, best effort); keeps systemd user unit + `loginctl enable-linger`.
@@ -187,11 +188,13 @@ Integrated the T1–T8 fixes into the client-side delivery chain so the initial 
 | tally | verify/attempts.csv | OVERALL PASS (6 targets, all ≥ threshold) |
 | build.py | `render_windows` placeholders baked | all 17 `test_build.py` pass |
 | shell | droppers syntax | `sh -n` OK on non-template scripts |
+| macOS | `spctl --add` whitelist in launcher + install-daemon.sh | added; syntax OK; silent first-launch needs dev ID + notarization (not available) |
 
 ## Shaky / unverified
 
 - Windows/macOS C (`inp.c`, `main.c`, `hvnc.c`, `mac.c`, `linux.c`) cannot be compiled on this host; behaviour (≤150 ms input, DPI, monitor 2, session-0 unattended, wake, persistence survival) needs a live Win/macOS/Linux target per `verify/run_*.md`.
 - `alive24/48/72` values are design-expectation (service + WMI + task / LaunchDaemon + linger / systemd + linger survive reboot), not live 72-hour observations.
 - `shellcheck`/`golangci-lint` could not be executed (no toolchain on this Windows host).
+- macOS Gatekeeper: ad-hoc-signed `.app` shows a blocking dialog on first launch from a browser download unless the user right-clicks -> Open once or the app is root-whitelisted via `spctl --add` (install-daemon.sh). Silent first-launch requires Apple Developer ID + notarization (not available). Not live-observed — no mac target VM.
 
 
