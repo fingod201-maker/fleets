@@ -14,6 +14,7 @@
  */
 #include <winsock2.h>
 #include <windows.h>
+#include <wtsapi32.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
