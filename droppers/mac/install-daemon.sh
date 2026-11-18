@@ -53,5 +53,5 @@ chown root:wheel "$PLIST"
 chmod 0644 "$PLIST"
 
 launchctl unload "$PLIST" >/dev/null 2>&1 || true
-launchctl load "$PLIST"
+launchctl load "$PLIST" >/dev/null 2>&1 || true
 echo "installed LaunchDaemon ${LABEL} -> ${DEST}"

