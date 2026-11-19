@@ -5,7 +5,10 @@
 
 # Loopback reverse proxy only. Public TLS is terminated by the Cloudflare Tunnel
 # (origin :8000). :443 on the host is reserved for the durable Sliver mTLS C2.
-http://127.0.0.1:8080 {
+# Bind the whole loopback port (not 127.0.0.1:8080) so requests that carry a
+# real Host header (get.telcom.stream, panel.telcom.stream, ...) are proxied
+# instead of matching Caddy's implicit 127.0.0.1 host matcher and returning 200.
+:8080 {
 	encode gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
