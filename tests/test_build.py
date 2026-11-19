@@ -251,3 +251,23 @@ def test_pick_latest_skips_terminal_for_binary():
     assert build.pick_latest(rows, "linux", ".tar.gz")["ts"] == 150
     assert build.pick_latest(rows, "darwin")["ts"] == 200
     assert build.pick_latest(rows, "windows", ".zip") is None
+
+
+def test_panel_c2_url_uses_dedicated_dns_only_host(tmp_settings):
+    cfg = dataclasses.replace(
+        tmp_settings, public_host="panel.example.com", c2_host="", c2_port=0
+    )
+    assert build.panel_c2_url(cfg) == "panel.example.com:8888"
+    cfg = dataclasses.replace(cfg, c2_host="c2.example.com", c2_port=443)
+    assert build.panel_c2_url(cfg) == "c2.example.com:443"
+
+
+def test_delivery_host_uses_public_lure_host(tmp_settings):
+    cfg = dataclasses.replace(
+        tmp_settings,
+        public_host="panel.example.com",
+        lure_hosts=["get", "us01web"],
+    )
+    assert build.delivery_host(cfg) == "get.example.com"
+    cfg = dataclasses.replace(cfg, public_host="localhost", lure_hosts=[])
+    assert build.delivery_host(cfg) == "get.localhost"

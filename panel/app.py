@@ -370,7 +370,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source = (
             template.replace("{{PANEL_ENDPOINT}}", endpoint)
             .replace("{{PANEL_HOST}}", request_host(request))
-            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_C2_PORT}}", str(config.c2_port or C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
         return PlainTextResponse(
@@ -424,7 +424,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source = (
             template.replace("{{PANEL_ENDPOINT}}", endpoint)
             .replace("{{PANEL_HOST}}", request_host(request))
-            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_C2_PORT}}", str(config.c2_port or C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
         return PlainTextResponse(

