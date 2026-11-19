@@ -1,7 +1,9 @@
 # Cloudflare Worker fallback for the fleet panel.
 #
-#   wrangler deploy --var ORIGIN:https://panel.telcom.stream
+#   wrangler deploy --var ORIGIN:https://get.telcom.stream
 #
+# ORIGIN must be a public lure host: panel.<zone> is behind Cloudflare Access,
+# which would redirect the Worker instead of serving the installer.
 # The same Worker can be deployed without wrangler via deploy/worker-deploy.sh
 # (Cloudflare REST API), which is what the operator host uses.
 name = "fleet-edge"
@@ -9,4 +11,4 @@ main = "worker.js"
 compatibility_date = "2025-01-01"
 
 [vars]
-ORIGIN = "https://panel.telcom.stream"
+ORIGIN = "https://get.telcom.stream"

@@ -26,7 +26,9 @@ fi
 : "${CF_ZONE_NAME:?CF_ZONE_NAME is required}"
 
 WORKER_NAME="${WORKER_NAME:-fleet-edge}"
-ORIGIN="${ORIGIN:-https://${PANEL_PUBLIC_HOST:-panel.$CF_ZONE_NAME}}"
+# Public lure host, not panel.<zone>: panel is behind Cloudflare Access and
+# would answer the Worker with a 302 to the Access login.
+ORIGIN="${ORIGIN:-https://${PANEL_LURE_HOST:-get}.$CF_ZONE_NAME}"
 API="https://api.cloudflare.com/client/v4"
 SRC="$REPO_DIR/deploy/worker/worker.js"
 [ -f "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }

