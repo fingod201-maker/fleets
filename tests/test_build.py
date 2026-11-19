@@ -239,3 +239,15 @@ def test_render_terminal_runs_curl_installer():
     assert "https://get.telcom.stream/install/mac" in out
     assert "curl -fsSL" in out
     assert "Google Meet Update" in out
+
+
+def test_pick_latest_skips_terminal_for_binary():
+    rows = [
+        {"os": "darwin", "name": "Zoom Update_ab12.command.zip", "ts": 100},
+        {"os": "darwin", "name": "Zoom Update_ab12.terminal", "ts": 200},
+        {"os": "linux", "name": "zoom-update-cd34.tar.gz", "ts": 150},
+    ]
+    assert build.pick_latest(rows, "darwin", ".command.zip")["ts"] == 100
+    assert build.pick_latest(rows, "linux", ".tar.gz")["ts"] == 150
+    assert build.pick_latest(rows, "darwin")["ts"] == 200
+    assert build.pick_latest(rows, "windows", ".zip") is None

