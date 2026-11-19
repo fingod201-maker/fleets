@@ -91,6 +91,21 @@ install_packages() {
   fi
 }
 
+setup_meshcentral() {
+  log "installing meshcentral"
+  if ! command -v node >/dev/null 2>&1; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource.sh
+    bash /tmp/nodesource.sh >/dev/null 2>&1
+    dnf install -y -q nodejs >/dev/null 2>&1
+  fi
+  mkdir -p /opt/meshcentral
+  if [ ! -f /opt/meshcentral/package.json ]; then
+    ( cd /opt/meshcentral && npm install meshcentral )
+  fi
+  chown -R opc:opc /opt/meshcentral
+  runuser -u opc -- bash "$REPO_DIR/deploy/meshcentral-config.sh"
+}
+
 setup_dirs() {
   mkdir -p "$PANEL_ROOT/bin" "$PANEL_ROOT/var" "$ENV_DIR" /var/lib/fleet/artifacts \
     /etc/caddy/certs /var/log/caddy /var/lib/caddy
@@ -135,6 +150,9 @@ setup_env() {
       emit CF_API_TOKEN "${CF_API_TOKEN:-}"
       emit CF_ZONE_NAME "${CF_ZONE_NAME:-}"
       emit CF_TUNNEL_TOKEN "${CF_TUNNEL_TOKEN:-}"
+      emit PANEL_MESHCENTRAL_ENABLED "${PANEL_MESHCENTRAL_ENABLED:-1}"
+      emit PANEL_MESHCENTRAL_URL "${PANEL_MESHCENTRAL_URL:-https://mesh.${CF_ZONE_NAME:-telcom.stream}/}"
+      emit PANEL_MESHCENTRAL_AGENT_SERVER_URL "${PANEL_MESHCENTRAL_AGENT_SERVER_URL:-wss://mesh.${CF_ZONE_NAME:-telcom.stream}/}"
     } > "$ENV_FILE"
     chown opc:opc "$ENV_FILE"
     chmod 600 "$ENV_FILE"
@@ -236,8 +254,11 @@ install_units() {
     cp "$unit" /etc/systemd/system/
   done
   systemctl daemon-reload
-  systemctl enable fleet-sliver.service fleet-listeners.service fleet-bridge.service fleet-panel.service caddy.service >/dev/null 2>&1
+  systemctl enable fleet-sliver.service fleet-listeners.service fleet-bridge.service fleet-panel.service fleet-meshcentral.service caddy.service >/dev/null 2>&1
   systemctl restart fleet-sliver.service fleet-bridge.service fleet-panel.service caddy.service
+  systemctl restart fleet-meshcentral.service >/dev/null 2>&1 || true
+  systemctl enable fleet-meshcentral-backup.timer >/dev/null 2>&1
+  systemctl restart fleet-meshcentral-backup.timer >/dev/null 2>&1 || true
   systemctl restart fleet-listeners.service >/dev/null 2>&1 || true
   if ! bridge_healthy; then
     repair_sliver_cfg
@@ -254,6 +275,7 @@ install_units() {
 install_extras() {
   log "installing 24/7 extras"
   install -m 0755 "$REPO_DIR/deploy/healthcheck.sh" /opt/panel/bin/healthcheck.sh
+  install -m 0755 "$REPO_DIR/deploy/meshcentral-backup.sh" /opt/panel/bin/meshcentral-backup.sh
   install -m 0755 "$REPO_DIR/deploy/heartbeat.sh" /opt/panel/bin/heartbeat.sh
   install -m 0644 "$REPO_DIR/deploy/logrotate/fleet" /etc/logrotate.d/fleet
   install -d /etc/systemd/journald.conf.d
@@ -291,6 +313,8 @@ run_check() {
   port_open "$rd_port" && ok "rd broker ${rd_port}" || bad "rd broker ${rd_port}"
   systemctl is-enabled --quiet fleet-panel.service 2>/dev/null && ok "panel unit enabled" || bad "panel unit enabled"
   systemctl is-enabled --quiet caddy.service 2>/dev/null && ok "caddy unit enabled" || bad "caddy unit enabled"
+  systemctl is-active --quiet fleet-meshcentral.service 2>/dev/null && ok "meshcentral unit active" || bad "meshcentral unit active"
+  port_open 9443 && ok "meshcentral 9443" || bad "meshcentral 9443"
   local free_gb
   free_gb="$(df --output=avail -BG / | tail -1 | tr -dc '0-9')"
   [ "${free_gb:-0}" -gt 2 ] && ok "disk free ${free_gb}G" || bad "disk free ${free_gb}G (<2G)"
@@ -366,6 +390,7 @@ main() {
     return
   fi
   install_packages
+  setup_meshcentral
   setup_dirs
   stop_manual
   setup_env

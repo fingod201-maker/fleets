@@ -13,6 +13,7 @@ Target observed: Oracle Linux **10.2**, **x86_64** (spec said OL9/arm64 — see
 | 8000 | 127.0.0.1 | panel. |
 | 8001 | 127.0.0.1 | bridge. |
 | 8443 | 127.0.0.1 | rd broker (helpers connect from the internet). |
+| 9443 | 127.0.0.1 | MeshCentral console + agent WSS (mesh.<zone> via tunnel). |
 
 ## Steps
 
@@ -25,6 +26,22 @@ Target observed: Oracle Linux **10.2**, **x86_64** (spec said OL9/arm64 — see
    mTLS implants) while Caddy is the public edge. The instance's own
    `firewalld` is opened by `deploy.sh`.
 3. Verify: `sudo ./deploy.sh --check`.
+
+## MeshCentral (Phase 8)
+
+Stand-alone MeshCentral (`fleet-meshcentral.service`, `/opt/meshcentral`,
+data dir `/opt/meshcentral/meshcentral-data`) — public URL
+`https://mesh.<zone>/` via the `fleet-edge` cloudflared tunnel -> `127.0.0.1:9443`
+(agent endpoint `wss://mesh.<zone>/`, TLS offloaded at the edge).
+`deploy/meshcentral-config.sh` writes `meshcentral-data/config.json`
+(tlsoffload `127.0.0.1`, wanonly true, agentpong 60, newAccounts false,
+password requirements, certUrl).
+
+- Backup: `deploy/meshcentral-backup.sh` (+ timer) -> `/var/lib/fleet/meshcentral-backups`.
+- Operator: panel `/mesh` (panel login via Access) links the standalone console;
+  MeshCentral keeps its own invite-only admin domain with 2FA.
+- Agents: outbound-only (WAN), no inbound firewall rule needed; Windows/Linux/
+  macOS/Android installers via console "Add Agent".
 
 ## After the Cloudflare Tunnel (EXTRA A)
 

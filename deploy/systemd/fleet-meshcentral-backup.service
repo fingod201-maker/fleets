@@ -1,0 +1,8 @@
+[Unit]
+Description=fleet meshcentral backup
+After=fleet-meshcentral.service
+Requires=fleet-meshcentral.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/panel/bin/meshcentral-backup.sh

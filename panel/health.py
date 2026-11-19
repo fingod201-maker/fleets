@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 
 import httpx
 
+from . import mesh
 from .config import Settings
 
 
@@ -74,6 +75,11 @@ def snapshot(config: Settings) -> dict[str, Probe]:
         probes["tls"] = Probe("tls", "ok" if ok else "warn", detail)
     else:
         probes["tls"] = Probe("tls", "n/a", "no cert configured")
+
+    mesh_state = mesh.probe(config)
+    probes["meshcentral"] = Probe(
+        "meshcentral", "up" if mesh_state.ok else "down", mesh_state.detail or ""
+    )
 
     return probes
 

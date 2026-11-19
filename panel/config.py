@@ -73,6 +73,17 @@ class Settings:
     tg_thread_health: int = 0
     tg_thread_new: int = 0
     tg_thread_returning: int = 0
+    meshcentral_url: str = ""
+    meshcentral_agent_server_url: str = ""
+    meshcentral_enabled: bool = False
+    meshcentral_api_key: str = ""
+    meshcentral_mesh_id: str = ""
+    meshcentral_agent_key: str = ""
+    meshcentral_invite_url: str = ""
+    meshcentral_admin_user: str = ""
+    meshcentral_admin_pass: str = ""
+    meshcentral_meshctrl: str = "/opt/meshcentral/node_modules/meshcentral/meshctrl.js"
+    meshcentral_ws_url: str = "ws://127.0.0.1:9443"
 
     @property
     def templates_dir(self) -> Path:
@@ -176,4 +187,22 @@ class Settings:
             ],
             panel_bin_dir=get("PANEL_BIN_DIR", "/opt/panel/bin") or "/opt/panel/bin",
             rd_endpoint=get("PANEL_RD_ENDPOINT", "127.0.0.1:8443") or "127.0.0.1:8443",
+            meshcentral_url=(get("PANEL_MESHCENTRAL_URL", "") or ""),
+            meshcentral_agent_server_url=(get("PANEL_MESHCENTRAL_AGENT_SERVER_URL", "") or ""),
+            meshcentral_enabled=(get("PANEL_MESHCENTRAL_ENABLED", "0") or "0")
+            not in {"0", "false", "no", "off"},
+            meshcentral_api_key=(get("PANEL_MESHCENTRAL_API_KEY", "") or ""),
+            meshcentral_mesh_id=(get("PANEL_MESHCENTRAL_MESH_ID", "") or ""),
+            meshcentral_agent_key=(get("PANEL_MESHCENTRAL_AGENT_KEY", "") or ""),
+            meshcentral_invite_url=(get("PANEL_MESHCENTRAL_INVITE_URL", "") or ""),
+            meshcentral_admin_user=(get("PANEL_MESHCENTRAL_ADMIN_USER", "") or ""),
+            meshcentral_admin_pass=(get("PANEL_MESHCENTRAL_ADMIN_PASS", "") or ""),
+            meshcentral_meshctrl=(
+                get(
+                    "PANEL_MESHCENTRAL_MESHCTRL",
+                    "/opt/meshcentral/node_modules/meshcentral/meshctrl.js",
+                )
+                or ""
+            ),
+            meshcentral_ws_url=(get("PANEL_MESHCENTRAL_WS_URL", "ws://127.0.0.1:9443") or ""),
         )
