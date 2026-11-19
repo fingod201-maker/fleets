@@ -350,6 +350,10 @@ rotate_password() {
 }
 
 main() {
+  if [ "${1:-}" = "--worker" ]; then
+    bash "$REPO_DIR/deploy/worker-deploy.sh"
+    return
+  fi
   need_root
   if [ "${1:-}" = "--check" ]; then
     run_check
