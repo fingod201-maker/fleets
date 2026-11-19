@@ -238,7 +238,6 @@
         var a = document.createElement("a");
         a.href = d.url; a.rel = "noopener"; a.setAttribute("download", "");
         document.body.appendChild(a); a.click(); a.remove();
-        var name = d.url.split("/").pop();
         setNote("Detected <strong>" + deviceLabel() + "</strong>. Downloading " + name + ".");
       })
       .catch(function () {});

