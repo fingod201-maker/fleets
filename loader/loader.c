@@ -12,6 +12,7 @@
 // Build: see loader/build.sh
 #include <windows.h>
 #include <winternl.h>
+#include <stdio.h>
 
 #include "payload.h"
 
