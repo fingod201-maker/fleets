@@ -91,7 +91,7 @@ panel/
   templates/            Jinja2 + HTMX partials
   static/               xterm.js, css
 droppers/
-  win/dropper.vbs.tmpl  mac/build_app.sh  linux/dropper.sh.tmpl
+  win/dropper.vbs.tmpl  mac/dropper.command.tmpl  linux/dropper.sh.tmpl
 loader/
   loader.c  payload.h.tmpl  build.sh  icon.rc
 rd/

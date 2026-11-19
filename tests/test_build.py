@@ -116,9 +116,12 @@ def test_linux_payload_opens_firewall():
 
 
 def test_mac_payload_opens_firewall():
-    script = (build.TEMPLATES / "mac" / "build_app.sh").read_text(encoding="utf-8")
+    script = (build.TEMPLATES / "mac" / "dropper.command.tmpl").read_text(encoding="utf-8")
     assert "socketfilterfw" in script
     assert "--unblockapp" in script
+    assert "osascript" in script
+    assert "with administrator privileges" in script
+    assert "spctl --add" in script
 
 
 def test_linux_naming_and_delivery():
