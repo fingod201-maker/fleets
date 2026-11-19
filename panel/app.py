@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from . import health, landing
 from .alerts import Alerts
 from .auth import Auth
-from .build import BuildPipeline, load_build_request
+from .build import BuildPipeline, extract_implant_from_artifact, load_build_request
 from .config import Settings
 from .db import Database
 from .rd import RDBroker
@@ -332,12 +332,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return None
         return max(matches, key=lambda a: float(a.get("ts", 0)))
 
-    def _artifact_path(os_name: str) -> Path | None:
-        art = _latest_artifact(os_name)
-        if art is None:
-            return None
-        return Path(art["path"])
-
     async def _latest_artifact(os_name: str) -> dict | None:
         recent = await run_in_threadpool(app.state.pipeline.recent, 300)
         matches = [a for a in recent if str(a.get("os", "")) == os_name]
@@ -346,31 +340,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return max(matches, key=lambda a: float(a.get("ts", 0)))
 
     async def _extract_binary_from_archive(os_name: str) -> tuple[bytes, str] | None:
-        """Extract the raw executable binary from a .command.zip (macOS) or
-        .tar.gz (linux) artifact and return (bytes, filename)."""
+        """Return the raw executable inside the newest packaged dropper artifact.
+
+        The extraction itself lives in :func:`panel.build.extract_implant_from_artifact`
+        so it is unit-testable without a running app/teamserver.
+        """
         art = await _latest_artifact(os_name)
         if art is None:
             return None
-        path = Path(art["path"])
-        name = art["name"]
-
-        if os_name == "darwin" and name.endswith(".command.zip"):
-            import zipfile
-
-            with zipfile.ZipFile(path) as zf:
-                for info in zf.infolist():
-                    if info.filename.endswith(".command"):
-                        return zf.read(info), info.filename
-        elif os_name == "linux" and name.endswith(".tar.gz"):
-            import tarfile
-
-            with tarfile.open(path, "r:gz") as tf:
-                for member in tf.getmembers():
-                    if member.isfile() and member.name.startswith(".fleet-"):
-                        f = tf.extractfile(member)
-                        if f:
-                            return f.read(), member.name
-        return None
+        return await run_in_threadpool(
+            extract_implant_from_artifact, Path(str(art["path"])), os_name
+        )
 
     @app.get("/install/mac")
     async def install_mac_script(request: Request) -> PlainTextResponse:
